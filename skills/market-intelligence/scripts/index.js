@@ -1,6 +1,6 @@
-const { callDeepSeek } = require('../llm');
-const { loadSkills } = require('../skill-loader');
-const { normalizeTicker, parseJsonResponse } = require('../utils');
+const { callDeepSeek } = require('../../../backend/lib/llm');
+const { loadSkills } = require('../../../backend/lib/skill-loader');
+const { normalizeTicker, parseJsonResponse } = require('../../../backend/lib/utils');
 
 const skills = loadSkills();
 
@@ -129,7 +129,7 @@ function buildFallbackAnalysis(ticker, marketData) {
       `Price vs MA50: ${((marketData.price / marketData.ma50 - 1) * 100).toFixed(1)}%`,
     ],
     riskFlags: [],
-    marketContext: 'LLM analysis unavailable — check API key.',
+    marketContext: 'LLM analysis unavailable - check API key.',
   };
 }
 

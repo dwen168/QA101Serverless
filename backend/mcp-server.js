@@ -2,9 +2,9 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 
-const { runMarketIntelligence } = require('./lib/skills/market-intelligence');
-const { runEdaVisualAnalysis } = require('./lib/skills/eda-visual-analysis');
-const { runTradeRecommendation } = require('./lib/skills/trade-recommendation');
+const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
+const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
+const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
 const { runFullAnalysis } = require('./lib/pipeline');
 
 const server = new McpServer({

@@ -1,6 +1,6 @@
-const { callDeepSeek } = require('../llm');
-const { loadSkills } = require('../skill-loader');
-const { computeMovingAverage, parseJsonResponse, requireObject } = require('../utils');
+const { callDeepSeek } = require('../../../backend/lib/llm');
+const { loadSkills } = require('../../../backend/lib/skill-loader');
+const { computeMovingAverage, parseJsonResponse, requireObject } = require('../../../backend/lib/utils');
 
 const skills = loadSkills();
 
@@ -16,7 +16,7 @@ function buildCharts(marketData) {
   return {
     priceChart: {
       type: 'line',
-      title: `${ticker} — 30-Day Price & Moving Averages`,
+      title: `${ticker} - 30-Day Price & Moving Averages`,
       data: {
         labels,
         datasets: [
@@ -28,7 +28,7 @@ function buildCharts(marketData) {
     },
     volumeChart: {
       type: 'bar',
-      title: `${ticker} — Volume Analysis`,
+      title: `${ticker} - Volume Analysis`,
       data: {
         labels,
         datasets: [
@@ -39,7 +39,7 @@ function buildCharts(marketData) {
     },
     analystChart: {
       type: 'doughnut',
-      title: `${ticker} — Analyst Consensus`,
+      title: `${ticker} - Analyst Consensus`,
       data: {
         labels: ['Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell'],
         datasets: [{
@@ -58,7 +58,7 @@ function buildCharts(marketData) {
     },
     sentimentChart: {
       type: 'bar',
-      title: `${ticker} — News Sentiment`,
+      title: `${ticker} - News Sentiment`,
       data: {
         labels: marketData.news.map((headline) => headline.source),
         datasets: [{
@@ -74,12 +74,12 @@ function buildCharts(marketData) {
 function buildFallbackInsights(marketData) {
   return {
     insights: [
-      `RSI at ${marketData.rsi} — ${marketData.rsi > 70 ? 'overbought territory' : marketData.rsi < 30 ? 'oversold territory' : 'healthy range'}`,
+      `RSI at ${marketData.rsi} - ${marketData.rsi > 70 ? 'overbought territory' : marketData.rsi < 30 ? 'oversold territory' : 'healthy range'}`,
       `Price is ${((marketData.price / marketData.ma50 - 1) * 100).toFixed(1)}% above MA50`,
       `Sentiment score of ${marketData.sentimentScore} indicates ${marketData.sentimentLabel} market mood`,
       `Analyst upside potential: ${marketData.analystConsensus.upside}%`,
     ],
-    riskFlags: marketData.rsi > 70 ? ['Overbought — potential pullback risk'] : [],
+    riskFlags: marketData.rsi > 70 ? ['Overbought - potential pullback risk'] : [],
     technicalSummary: `${marketData.ticker} shows a ${marketData.trend} trend with RSI at ${marketData.rsi}.`,
     momentumSignal: marketData.changePercent > 0 ? 'POSITIVE' : 'NEGATIVE',
   };

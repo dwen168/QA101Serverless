@@ -1,6 +1,6 @@
-const { callDeepSeek } = require('../llm');
-const { loadSkills } = require('../skill-loader');
-const { parseJsonResponse, requireObject } = require('../utils');
+const { callDeepSeek } = require('../../../backend/lib/llm');
+const { loadSkills } = require('../../../backend/lib/skill-loader');
+const { parseJsonResponse, requireObject } = require('../../../backend/lib/utils');
 
 const skills = loadSkills();
 
@@ -16,7 +16,7 @@ function scoreSignals(marketData) {
   if (marketData.price > marketData.ma50) {
     add('Price > MA50', 2, 'Bullish trend confirmation');
   } else {
-    add('Price < MA50', -2, 'Bearish trend — price below medium-term average');
+    add('Price < MA50', -2, 'Bearish trend - price below medium-term average');
   }
 
   if (marketData.price > marketData.ma200) {
@@ -26,17 +26,17 @@ function scoreSignals(marketData) {
   }
 
   if (marketData.rsi > 70) {
-    add('RSI Overbought', -2, `RSI ${marketData.rsi} > 70 — overextended`);
+    add('RSI Overbought', -2, `RSI ${marketData.rsi} > 70 - overextended`);
   } else if (marketData.rsi < 30) {
-    add('RSI Oversold', 1, `RSI ${marketData.rsi} < 30 — contrarian buy signal`);
+    add('RSI Oversold', 1, `RSI ${marketData.rsi} < 30 - contrarian buy signal`);
   } else if (marketData.rsi >= 45 && marketData.rsi <= 65) {
     add('RSI Healthy', 1, `RSI ${marketData.rsi} in bullish healthy zone`);
   }
 
   if (marketData.sentimentScore > 0.3) {
-    add('Positive Sentiment', 2, `Sentiment score ${marketData.sentimentScore} — bullish`);
+    add('Positive Sentiment', 2, `Sentiment score ${marketData.sentimentScore} - bullish`);
   } else if (marketData.sentimentScore < -0.3) {
-    add('Negative Sentiment', -2, `Sentiment score ${marketData.sentimentScore} — bearish`);
+    add('Negative Sentiment', -2, `Sentiment score ${marketData.sentimentScore} - bearish`);
   }
 
   const consensus = marketData.analystConsensus;
@@ -85,7 +85,7 @@ function buildFallbackRecommendation(marketData, action, signals, confidence, bu
     rationale: `Based on technical and sentiment analysis, ${marketData.ticker} shows a ${marketData.trend} setup with ${marketData.rsi > 50 ? 'positive' : 'weakening'} momentum. Analyst consensus supports the view with ${(buyRatio * 100).toFixed(0)}% buy ratings.`,
     timeHorizon: 'MEDIUM',
     keyRisks: ['Market volatility', 'Sector headwinds', 'RSI extended'],
-    executiveSummary: `${marketData.ticker} — ${action} recommendation based on ${signals.length} signals with ${confidence}% confidence.`,
+    executiveSummary: `${marketData.ticker} - ${action} recommendation based on ${signals.length} signals with ${confidence}% confidence.`,
   };
 }
 
@@ -127,7 +127,7 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
       takeProfit,
       riskReward,
       ...llmRecommendation,
-      disclaimer: '⚠️ For educational/demo purposes only. Not financial advice.',
+      disclaimer: 'WARNING: For educational/demo purposes only. Not financial advice.',
     },
     skillUsed: 'trade-recommendation',
   };

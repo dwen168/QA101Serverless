@@ -1,6 +1,6 @@
-const { runMarketIntelligence } = require('./skills/market-intelligence');
-const { runEdaVisualAnalysis } = require('./skills/eda-visual-analysis');
-const { runTradeRecommendation } = require('./skills/trade-recommendation');
+const { runMarketIntelligence } = require('../../skills/market-intelligence/scripts');
+const { runEdaVisualAnalysis } = require('../../skills/eda-visual-analysis/scripts');
+const { runTradeRecommendation } = require('../../skills/trade-recommendation/scripts');
 
 async function runFullAnalysis({ ticker }) {
   const marketIntelligence = await runMarketIntelligence({ ticker });
