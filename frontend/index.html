@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuantBot — AI Stock Analysis</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060912;
+    --bg2: #0d1424;
+    --bg3: #111b2e;
+    --border: rgba(0,212,255,0.12);
+    --border2: rgba(0,212,255,0.25);
+    --cyan: #00d4ff;
+    --cyan-dim: rgba(0,212,255,0.15);
+    --green: #10e898;
+    --green-dim: rgba(16,232,152,0.15);
+    --red: #ff4b6e;
+    --red-dim: rgba(255,75,110,0.15);
+    --amber: #f5a623;
+    --amber-dim: rgba(245,166,35,0.12);
+    --text: #e8f0fe;
+    --text2: #7a8fb8;
+    --text3: #3d5080;
+    --font: 'Sora', sans-serif;
+    --mono: 'DM Mono', monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Top bar ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 24px; height: 56px; border-bottom: 1px solid var(--border);
+    background: rgba(6,9,18,0.9); backdrop-filter: blur(12px);
+    flex-shrink: 0; position: relative; z-index: 10;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; }
+  .logo-icon { width: 28px; height: 28px; background: var(--cyan); border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .logo-icon svg { width: 16px; height: 16px; fill: var(--bg); }
+  .logo-text { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
+  .logo-text span { color: var(--cyan); }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .skill-pills { display: flex; gap: 6px; }
+  .skill-pill {
+    font-size: 11px; font-weight: 500; font-family: var(--mono);
+    padding: 3px 10px; border-radius: 20px;
+    border: 1px solid var(--border); color: var(--text2);
+    background: var(--bg2); transition: all 0.2s;
+  }
+  .skill-pill.active { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+  .skill-pill.done { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+
+  /* ── Main layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Chat panel ── */
+  .chat-panel { width: 380px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .chat-messages::-webkit-scrollbar { width: 4px; }
+  .chat-messages::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .msg { max-width: 85%; display: flex; flex-direction: column; gap: 4px; }
+  .msg.user { align-self: flex-end; align-items: flex-end; }
+  .msg.bot { align-self: flex-start; align-items: flex-start; }
+  .msg-bubble {
+    padding: 10px 14px; border-radius: var(--radius); font-size: 13.5px; line-height: 1.55;
+  }
+  .msg.user .msg-bubble { background: var(--cyan); color: var(--bg); font-weight: 500; border-radius: var(--radius) var(--radius) 4px var(--radius); }
+  .msg.bot .msg-bubble { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px var(--radius) var(--radius) var(--radius); }
+  .msg-time { font-size: 10px; color: var(--text3); font-family: var(--mono); }
+
+  .skill-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px; font-family: var(--mono); padding: 2px 8px;
+    border-radius: 4px; margin-bottom: 4px;
+  }
+  .skill-badge.s1 { background: rgba(0,212,255,0.1); color: var(--cyan); border: 1px solid rgba(0,212,255,0.2); }
+  .skill-badge.s2 { background: rgba(16,232,152,0.1); color: var(--green); border: 1px solid rgba(16,232,152,0.2); }
+  .skill-badge.s3 { background: rgba(245,166,35,0.1); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+
+  .chat-input-area { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg); }
+  .chat-input-row { display: flex; gap: 8px; }
+  .chat-input {
+    flex: 1; background: var(--bg3); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 14px; color: var(--text);
+    font-family: var(--font); font-size: 13px; outline: none; resize: none;
+    transition: border-color 0.2s;
+  }
+  .chat-input:focus { border-color: var(--cyan); }
+  .chat-input::placeholder { color: var(--text3); }
+  .send-btn {
+    background: var(--cyan); border: none; border-radius: var(--radius-sm);
+    width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center;
+    justify-content: center; transition: opacity 0.2s; flex-shrink: 0;
+  }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn svg { width: 16px; height: 16px; fill: var(--bg); }
+  .quick-btns { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .quick-btn {
+    font-size: 11px; font-family: var(--mono); padding: 4px 10px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 20px; color: var(--text2); cursor: pointer; transition: all 0.15s;
+  }
+  .quick-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+
+  /* ── Analysis panel ── */
+  .analysis-panel { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .analysis-panel::-webkit-scrollbar { width: 4px; }
+  .analysis-panel::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .welcome-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; opacity: 0.5; }
+  .welcome-state .w-icon { font-size: 48px; line-height: 1; }
+  .welcome-state p { font-size: 14px; color: var(--text2); text-align: center; }
+
+  /* ── Cards ── */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .card-title { font-size: 12px; font-family: var(--mono); color: var(--text2); letter-spacing: 0.08em; text-transform: uppercase; }
+  .card-skill { font-size: 10px; font-family: var(--mono); padding: 2px 7px; border-radius: 4px; }
+
+  /* ── Ticker header ── */
+  .ticker-header { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; }
+  .ticker-main { display: flex; align-items: flex-start; justify-content: space-between; }
+  .ticker-left { display: flex; flex-direction: column; gap: 2px; }
+  .ticker-symbol { font-size: 28px; font-weight: 600; letter-spacing: -1px; color: var(--cyan); font-family: var(--mono); }
+  .ticker-name { font-size: 13px; color: var(--text2); }
+  .ticker-sector { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .ticker-right { text-align: right; }
+  .ticker-price { font-size: 26px; font-weight: 600; font-family: var(--mono); }
+  .ticker-change { font-size: 13px; font-family: var(--mono); margin-top: 2px; }
+  .ticker-change.up { color: var(--green); }
+  .ticker-change.down { color: var(--red); }
+  .ticker-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .stat-item { display: flex; flex-direction: column; gap: 3px; }
+  .stat-label { font-size: 10px; color: var(--text3); font-family: var(--mono); }
+  .stat-value { font-size: 13px; font-weight: 500; font-family: var(--mono); }
+
+  /* ── Intelligence cards ── */
+  .intel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .intel-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; }
+  .intel-label { font-size: 10px; color: var(--text3); font-family: var(--mono); margin-bottom: 6px; text-transform: uppercase; }
+  .intel-value { font-size: 14px; font-weight: 500; }
+
+  .trend-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 6px; }
+  .trend-badge.bullish { background: var(--green-dim); color: var(--green); border: 1px solid rgba(16,232,152,0.2); }
+  .trend-badge.bearish { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,75,110,0.2); }
+  .trend-badge.neutral { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+
+  .sentiment-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .sentiment-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+
+  /* ── News list ── */
+  .news-item { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .news-item:last-child { border-bottom: none; }
+  .news-title { font-size: 12.5px; line-height: 1.45; color: var(--text); flex: 1; }
+  .news-meta { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+  .news-source { font-size: 10px; font-family: var(--mono); color: var(--text3); }
+  .news-time { font-size: 10px; color: var(--text3); }
+  .news-sentiment { flex-shrink: 0; font-size: 11px; font-family: var(--mono); padding: 2px 6px; border-radius: 4px; }
+  .news-sentiment.pos { background: var(--green-dim); color: var(--green); }
+  .news-sentiment.neg { background: var(--red-dim); color: var(--red); }
+
+  /* ── Chart containers ── */
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .chart-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .chart-title { font-size: 11px; font-family: var(--mono); color: var(--text2); margin-bottom: 10px; }
+  .chart-canvas-wrap { position: relative; height: 160px; }
+  .chart-full { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .chart-full .chart-canvas-wrap { height: 200px; }
+
+  /* ── EDA Insights ── */
+  .insight-list { display: flex; flex-direction: column; gap: 8px; }
+  .insight-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; }
+  .insight-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); margin-top: 6px; flex-shrink: 0; }
+  .risk-flag { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 8px 10px; background: rgba(255,75,110,0.08); border: 1px solid rgba(255,75,110,0.15); border-radius: var(--radius-sm); color: var(--red); }
+
+  /* ── Recommendation card ── */
+  .rec-card { border-radius: var(--radius); padding: 20px; border: 1px solid var(--border); }
+  .rec-action { font-size: 36px; font-weight: 700; font-family: var(--mono); letter-spacing: -1px; margin-bottom: 4px; }
+  .rec-confidence { font-size: 13px; color: var(--text2); margin-bottom: 16px; }
+  .confidence-bar-wrap { background: var(--bg); border-radius: 3px; height: 6px; overflow: hidden; margin-top: 6px; }
+  .confidence-bar { height: 100%; border-radius: 3px; transition: width 0.8s cubic-bezier(0.4,0,0.2,1); }
+  .price-targets { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 16px 0; }
+  .target-item { background: var(--bg3); border-radius: var(--radius-sm); padding: 10px; }
+  .target-label { font-size: 10px; color: var(--text3); font-family: var(--mono); margin-bottom: 4px; }
+  .target-value { font-size: 16px; font-weight: 600; font-family: var(--mono); }
+  .signal-grid { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+  .signal-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .signal-pts { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
+  .signal-pts.pos { background: var(--green-dim); color: var(--green); }
+  .signal-pts.neg { background: var(--red-dim); color: var(--red); }
+  .signal-name { flex: 1; color: var(--text2); }
+  .signal-reason { font-size: 11px; color: var(--text3); }
+  .disclaimer { font-size: 10px; color: var(--text3); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .rr-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--mono); padding: 3px 8px; border-radius: 4px; margin-top: 8px; }
+
+  /* ── Loading ── */
+  .loading-step { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text2); }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--border2); border-top-color: var(--cyan); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .check-icon { color: var(--green); font-size: 14px; }
+
+  /* ── RSI Gauge ── */
+  .rsi-gauge { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; background: var(--bg3); border-radius: var(--radius-sm); }
+  .rsi-number { font-size: 32px; font-weight: 600; font-family: var(--mono); }
+  .rsi-label { font-size: 10px; font-family: var(--mono); padding: 2px 8px; border-radius: 4px; }
+  .rsi-bar-track { width: 100%; height: 6px; background: linear-gradient(to right, var(--cyan) 0%, var(--green) 30%, var(--amber) 70%, var(--red) 100%); border-radius: 3px; position: relative; }
+  .rsi-marker { position: absolute; top: -4px; width: 14px; height: 14px; background: white; border-radius: 50%; border: 2px solid var(--bg); transform: translateX(-50%); transition: left 0.6s ease; }
+
+  /* ── Analyst target bar ── */
+  .target-range { margin-top: 12px; }
+  .target-range-bar { height: 8px; background: var(--bg); border-radius: 4px; position: relative; margin: 6px 0; }
+  .target-range-fill { position: absolute; top: 0; height: 100%; border-radius: 4px; background: linear-gradient(to right, var(--red-dim), var(--green-dim)); }
+  .target-range-current { position: absolute; top: -4px; width: 16px; height: 16px; background: var(--cyan); border-radius: 50%; transform: translateX(-50%); }
+  .target-range-labels { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--mono); color: var(--text3); }
+
+  /* ── Animations ── */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn 0.35s ease forwards; }
+
+  .section-divider { display: flex; align-items: center; gap: 8px; }
+  .section-divider-line { flex: 1; height: 1px; background: var(--border); }
+  .section-divider-text { font-size: 10px; font-family: var(--mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 16 16"><path d="M8 1l2 5h5l-4 3 1.5 5L8 11l-4.5 3L5 9 1 6h5z"/></svg>
+    </div>
+    <span class="logo-text">Quant<span>Bot</span></span>
+  </div>
+  <div class="header-right">
+    <div class="skill-pills">
+      <span class="skill-pill" id="pill-1">① market-intelligence</span>
+      <span class="skill-pill" id="pill-2">② eda-visual-analysis</span>
+      <span class="skill-pill" id="pill-3">③ trade-recommendation</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Chat Panel -->
+  <div class="chat-panel">
+    <div class="chat-messages" id="chat-messages">
+      <div class="msg bot fade-in">
+        <div class="msg-bubble">
+          👋 Hi! I'm <strong>QuantBot</strong>, your AI quantitative analyst.<br><br>
+          I use <strong>3 Agent Skills</strong> to analyze any stock:<br>
+          • <strong style="color:var(--cyan)">Market Intelligence</strong> — trends, news, sentiment<br>
+          • <strong style="color:var(--green)">EDA Visual Analysis</strong> — charts & statistics<br>
+          • <strong style="color:var(--amber)">Trade Recommendation</strong> — buy/hold/sell<br><br>
+          Try: <em>"Analyze NVDA"</em> or <em>"Should I buy AAPL?"</em>
+        </div>
+        <span class="msg-time">QuantBot</span>
+      </div>
+    </div>
+    <div class="chat-input-area">
+      <div class="quick-btns" id="quick-btns">
+        <button class="quick-btn" onclick="quickAnalyze('AAPL')">AAPL</button>
+        <button class="quick-btn" onclick="quickAnalyze('NVDA')">NVDA</button>
+        <button class="quick-btn" onclick="quickAnalyze('TSLA')">TSLA</button>
+        <button class="quick-btn" onclick="quickAnalyze('MSFT')">MSFT</button>
+        <button class="quick-btn" onclick="quickAnalyze('META')">META</button>
+        <button class="quick-btn" onclick="quickAnalyze('AMZN')">AMZN</button>
+      </div>
+      <div class="chat-input-row">
+        <textarea class="chat-input" id="chat-input" rows="2" placeholder="Ask me to analyze a stock..."></textarea>
+        <button class="send-btn" onclick="sendMessage()">
+          <svg viewBox="0 0 16 16"><path d="M1 8L15 1 8 15 7 9z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Analysis Panel -->
+  <div class="analysis-panel" id="analysis-panel">
+    <div class="welcome-state" id="welcome-state">
+      <div class="w-icon">📊</div>
+      <p>Ask QuantBot to analyze a stock to see<br>charts, insights, and trade recommendations.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = 'http://localhost:3001/api';
+let chatHistory = [];
+let currentCharts = {};
+
+function formatTime() {
+  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function addMessage(role, content, skillBadge = null) {
+  const container = document.getElementById('chat-messages');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `msg ${role} fade-in`;
+  let html = '';
+  if (skillBadge) html += `<div class="skill-badge ${skillBadge.cls}">${skillBadge.label}</div>`;
+  html += `<div class="msg-bubble">${content}</div>`;
+  html += `<span class="msg-time">${role === 'user' ? 'You' : 'QuantBot'} · ${formatTime()}</span>`;
+  msgDiv.innerHTML = html;
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+function addLoadingMsg(text) {
+  const container = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.id = 'loading-msg';
+  div.className = 'msg bot fade-in';
+  div.innerHTML = `<div class="msg-bubble" style="display:flex;align-items:center;gap:8px;"><div class="spin"></div>${text}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function removeLoadingMsg() {
+  const el = document.getElementById('loading-msg');
+  if (el) el.remove();
+}
+
+function setPillState(n, state) {
+  const pill = document.getElementById(`pill-${n}`);
+  pill.className = `skill-pill ${state}`;
+}
+function resetPills() {
+  [1,2,3].forEach(n => setPillState(n, ''));
+}
+
+async function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  addMessage('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  await processMessage(text);
+}
+
+async function quickAnalyze(ticker) {
+  const text = `Analyze ${ticker}`;
+  addMessage('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  await processMessage(text);
+}
+
+async function processMessage(text) {
+  const loadEl = addLoadingMsg('Thinking...');
+  resetPills();
+
+  try {
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: chatHistory.slice(-6) }),
+    });
+    const data = await res.json();
+    removeLoadingMsg();
+
+    if (data.action === 'ANALYZE_STOCK' && data.ticker) {
+      addMessage('bot', data.message || `Running analysis on <strong>${data.ticker}</strong>...`);
+      chatHistory.push({ role: 'assistant', content: data.message });
+      await runSkillPipeline(data.ticker);
+    } else {
+      addMessage('bot', data.message || 'How can I help?');
+      chatHistory.push({ role: 'assistant', content: data.message });
+    }
+  } catch (err) {
+    removeLoadingMsg();
+    // Fallback: detect ticker in text
+    const match = text.toUpperCase().match(/\b([A-Z]{2,5})\b/);
+    if (match && text.toLowerCase().match(/analyz|buy|sell|recommend|check|look/)) {
+      addMessage('bot', `Running analysis on <strong>${match[1]}</strong>...`);
+      await runSkillPipeline(match[1]);
+    } else {
+      addMessage('bot', `Ask me to analyze a stock! e.g. "Analyze AAPL"`);
+    }
+  }
+}
+
+async function runSkillPipeline(ticker) {
+  // Clear previous analysis
+  const panel = document.getElementById('analysis-panel');
+  panel.innerHTML = '';
+  destroyCharts();
+
+  // ── SKILL 1 ──
+  setPillState(1, 'active');
+  const l1 = addLoadingMsg('⟳ Running market-intelligence skill...');
+
+  let marketData, llmAnalysis;
+  try {
+    const r1 = await fetch(`${API_BASE}/skills/market-intelligence`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker }),
+    });
+    const d1 = await r1.json();
+    marketData = d1.marketData;
+    llmAnalysis = d1.llmAnalysis;
+    setPillState(1, 'done');
+    removeLoadingMsg();
+    addMessage('bot', `✓ Market intelligence collected for <strong>${ticker}</strong>`, { cls: 's1', label: '① market-intelligence' });
+    renderMarketIntelligence(marketData, llmAnalysis, panel);
+  } catch (err) {
+    setPillState(1, '');
+    removeLoadingMsg();
+    addMessage('bot', `Could not reach the backend. Make sure the server is running on port 3001.`);
+    return;
+  }
+
+  // ── SKILL 2 ──
+  setPillState(2, 'active');
+  const l2 = addLoadingMsg('⟳ Running eda-visual-analysis skill...');
+
+  let charts, edaInsights;
+  try {
+    const r2 = await fetch(`${API_BASE}/skills/eda-visual-analysis`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketData }),
+    });
+    const d2 = await r2.json();
+    charts = d2.charts;
+    edaInsights = d2.edaInsights;
+    setPillState(2, 'done');
+    removeLoadingMsg();
+    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found`, { cls: 's2', label: '② eda-visual-analysis' });
+    renderEDA(charts, edaInsights, marketData, panel);
+  } catch (err) {
+    setPillState(2, '');
+    removeLoadingMsg();
+    addMessage('bot', `EDA analysis failed.`);
+  }
+
+  // ── SKILL 3 ──
+  setPillState(3, 'active');
+  const l3 = addLoadingMsg('⟳ Running trade-recommendation skill...');
+
+  try {
+    const r3 = await fetch(`${API_BASE}/skills/trade-recommendation`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marketData, edaInsights }),
+    });
+    const d3 = await r3.json();
+    setPillState(3, 'done');
+    removeLoadingMsg();
+    const rec = d3.recommendation;
+    addMessage('bot', `✓ <strong style="color:${rec.actionColor}">${rec.action}</strong> — ${rec.confidence}% confidence`, { cls: 's3', label: '③ trade-recommendation' });
+    renderRecommendation(rec, panel);
+  } catch (err) {
+    setPillState(3, '');
+    removeLoadingMsg();
+    addMessage('bot', `Recommendation engine failed.`);
+  }
+}
+
+// ─────────────────────────────────────────
+// RENDER: Market Intelligence
+// ─────────────────────────────────────────
+function renderMarketIntelligence(d, llm, panel) {
+  const changeClass = d.changePercent >= 0 ? 'up' : 'down';
+  const changeSign = d.changePercent >= 0 ? '+' : '';
+
+  const trendClass = d.trend === 'BULLISH' ? 'bullish' : d.trend === 'BEARISH' ? 'bearish' : 'neutral';
+  const sentColor = d.sentimentScore > 0.1 ? 'var(--green)' : d.sentimentScore < -0.1 ? 'var(--red)' : 'var(--amber)';
+  const sentPct = ((d.sentimentScore + 1) / 2 * 100).toFixed(0);
+
+  const fmtNum = (n) => n?.toLocaleString('en-US', { maximumFractionDigits: 2 }) ?? '—';
+
+  // Divider
+  const div0 = document.createElement('div');
+  div0.className = 'section-divider fade-in';
+  div0.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">① market-intelligence</span><div class="section-divider-line"></div>`;
+  panel.appendChild(div0);
+
+  // Ticker header
+  const header = document.createElement('div');
+  header.className = 'ticker-header fade-in';
+  header.innerHTML = `
+    <div class="ticker-main">
+      <div class="ticker-left">
+        <span class="ticker-symbol">${d.ticker}</span>
+        <span class="ticker-name">${d.name}</span>
+        <span class="ticker-sector">${d.sector}</span>
+      </div>
+      <div class="ticker-right">
+        <div class="ticker-price">$${fmtNum(d.price)}</div>
+        <div class="ticker-change ${changeClass}">${changeSign}${fmtNum(d.change)} (${changeSign}${d.changePercent.toFixed(2)}%)</div>
+      </div>
+    </div>
+    <div class="ticker-stats">
+      <div class="stat-item"><span class="stat-label">52W HIGH</span><span class="stat-value">$${fmtNum(d.high52w)}</span></div>
+      <div class="stat-item"><span class="stat-label">52W LOW</span><span class="stat-value">$${fmtNum(d.low52w)}</span></div>
+      <div class="stat-item"><span class="stat-label">P/E RATIO</span><span class="stat-value">${d.pe}x</span></div>
+      <div class="stat-item"><span class="stat-label">EPS</span><span class="stat-value">$${d.eps}</span></div>
+    </div>
+  `;
+  panel.appendChild(header);
+
+  // Intel grid
+  const grid = document.createElement('div');
+  grid.className = 'intel-grid fade-in';
+  grid.innerHTML = `
+    <div class="intel-card">
+      <div class="intel-label">Trend</div>
+      <div class="trend-badge ${trendClass}">${d.trend === 'BULLISH' ? '▲' : d.trend === 'BEARISH' ? '▼' : '→'} ${d.trend}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px">MA20: $${fmtNum(d.ma20)} · MA50: $${fmtNum(d.ma50)}</div>
+    </div>
+    <div class="intel-card">
+      <div class="intel-label">Sentiment</div>
+      <div class="intel-value" style="color:${sentColor}">${d.sentimentLabel} (${d.sentimentScore > 0 ? '+' : ''}${d.sentimentScore.toFixed(2)})</div>
+      <div class="sentiment-bar"><div class="sentiment-fill" style="width:${sentPct}%;background:${sentColor}"></div></div>
+    </div>
+    <div class="intel-card">
+      <div class="intel-label">Analyst Consensus</div>
+      <div style="font-size:11px;margin-top:2px">
+        <span style="color:var(--green)">▲ Buy: ${d.analystConsensus.strongBuy + d.analystConsensus.buy}</span> ·
+        <span style="color:var(--amber)">Hold: ${d.analystConsensus.hold}</span> ·
+        <span style="color:var(--red)">▼ Sell: ${d.analystConsensus.sell + d.analystConsensus.strongSell}</span>
+      </div>
+      <div style="margin-top:8px">
+        <div class="target-range-labels"><span>$${fmtNum(d.analystConsensus.targetLow)}</span><span>Target Mean: $${fmtNum(d.analystConsensus.targetMean)}</span><span>$${fmtNum(d.analystConsensus.targetHigh)}</span></div>
+        <div class="target-range-bar" style="margin:4px 0">
+          <div class="target-range-fill" style="left:0;right:0"></div>
+          <div class="target-range-current" style="left:${((d.price - d.analystConsensus.targetLow) / (d.analystConsensus.targetHigh - d.analystConsensus.targetLow) * 100).toFixed(0)}%"></div>
+        </div>
+        <div style="font-size:10px;color:var(--text3);text-align:center">Upside: <span style="color:${d.analystConsensus.upside > 0 ? 'var(--green)' : 'var(--red)'}">${d.analystConsensus.upside > 0 ? '+' : ''}${d.analystConsensus.upside}%</span></div>
+      </div>
+    </div>
+    <div class="intel-card">
+      <div class="intel-label">Volume</div>
+      <div class="intel-value">${(d.volume / 1e6).toFixed(1)}M</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:3px">Avg: ${(d.avgVolume / 1e6).toFixed(1)}M · ${d.volume > d.avgVolume ? '<span style="color:var(--green)">+Above avg</span>' : '<span style="color:var(--amber)">Below avg</span>'}</div>
+    </div>
+  `;
+  panel.appendChild(grid);
+
+  // LLM analysis summary
+  if (llm?.summary) {
+    const summary = document.createElement('div');
+    summary.className = 'card fade-in';
+    summary.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">AI Summary</span>
+        <span class="card-skill s1" style="background:rgba(0,212,255,0.1);color:var(--cyan);padding:2px 7px;border-radius:4px;font-size:10px;font-family:var(--mono)">DeepSeek</span>
+      </div>
+      <p style="font-size:13px;line-height:1.6;color:var(--text2);margin-bottom:10px">${llm.summary}</p>
+      ${llm.keyTrends?.length ? `<div style="display:flex;flex-direction:column;gap:5px">${llm.keyTrends.map(t => `<div class="insight-item"><div class="insight-dot"></div>${t}</div>`).join('')}</div>` : ''}
+    `;
+    panel.appendChild(summary);
+  }
+
+  // News
+  const newsCard = document.createElement('div');
+  newsCard.className = 'card fade-in';
+  newsCard.innerHTML = `
+    <div class="card-header"><span class="card-title">Breaking News</span></div>
+    ${d.news.map(n => `
+      <div class="news-item">
+        <div>
+          <div class="news-title">${n.title}</div>
+          <div class="news-meta"><span class="news-source">${n.source}</span><span class="news-time">${n.hoursAgo}h ago</span></div>
+        </div>
+        <span class="news-sentiment ${n.sentiment > 0 ? 'pos' : 'neg'}">${n.sentiment > 0 ? '+' : ''}${n.sentiment.toFixed(2)}</span>
+      </div>
+    `).join('')}
+  `;
+  panel.appendChild(newsCard);
+}
+
+// ─────────────────────────────────────────
+// RENDER: EDA
+// ─────────────────────────────────────────
+function renderEDA(charts, edaInsights, marketData, panel) {
+  // Divider
+  const div1 = document.createElement('div');
+  div1.className = 'section-divider fade-in';
+  div1.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">② eda-visual-analysis</span><div class="section-divider-line"></div>`;
+  panel.appendChild(div1);
+
+  const chartDefaults = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#7a8fb8', font: { size: 11, family: "'DM Mono', monospace" }, boxWidth: 12, padding: 8 } } },
+    scales: {
+      x: { ticks: { color: '#3d5080', font: { size: 10, family: "'DM Mono', monospace" }, maxRotation: 0, maxTicksLimit: 8 }, grid: { color: 'rgba(0,212,255,0.04)' }, border: { color: 'rgba(0,212,255,0.1)' } },
+      y: { ticks: { color: '#3d5080', font: { size: 10, family: "'DM Mono', monospace" } }, grid: { color: 'rgba(0,212,255,0.04)' }, border: { color: 'rgba(0,212,255,0.1)' } },
+    },
+  };
+
+  // Price chart (full width)
+  const priceWrap = document.createElement('div');
+  priceWrap.className = 'chart-full fade-in';
+  priceWrap.innerHTML = `<div class="chart-title">${charts.priceChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-price"></canvas></div>`;
+  panel.appendChild(priceWrap);
+  setTimeout(() => {
+    const ctx = document.getElementById('chart-price').getContext('2d');
+    currentCharts['price'] = new Chart(ctx, { type: 'line', data: charts.priceChart.data, options: { ...chartDefaults } });
+  }, 50);
+
+  // Volume + Analyst grid
+  const chartGrid = document.createElement('div');
+  chartGrid.className = 'chart-grid fade-in';
+  chartGrid.innerHTML = `
+    <div class="chart-wrap"><div class="chart-title">${charts.volumeChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-volume"></canvas></div></div>
+    <div class="chart-wrap"><div class="chart-title">${charts.analystChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-analyst"></canvas></div></div>
+  `;
+  panel.appendChild(chartGrid);
+  setTimeout(() => {
+    const ctxV = document.getElementById('chart-volume').getContext('2d');
+    currentCharts['volume'] = new Chart(ctxV, { type: 'bar', data: charts.volumeChart.data, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins } } });
+    const ctxA = document.getElementById('chart-analyst').getContext('2d');
+    currentCharts['analyst'] = new Chart(ctxA, { type: 'doughnut', data: charts.analystChart.data, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#7a8fb8', font: { size: 10, family: "'DM Mono', monospace" }, boxWidth: 10, padding: 6 } } }, cutout: '65%' } });
+  }, 50);
+
+  // Sentiment + RSI row
+  const bottomGrid = document.createElement('div');
+  bottomGrid.className = 'chart-grid fade-in';
+  const rsiColor = marketData.rsi > 70 ? 'var(--red)' : marketData.rsi < 30 ? 'var(--cyan)' : 'var(--green)';
+  const rsiLabel = marketData.rsi > 70 ? 'OVERBOUGHT' : marketData.rsi < 30 ? 'OVERSOLD' : 'NEUTRAL';
+  bottomGrid.innerHTML = `
+    <div class="chart-wrap"><div class="chart-title">${charts.sentimentChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-sentiment"></canvas></div></div>
+    <div class="chart-wrap" style="display:flex;flex-direction:column;justify-content:center">
+      <div class="chart-title">RSI Indicator</div>
+      <div class="rsi-gauge">
+        <div class="rsi-number" style="color:${rsiColor}">${marketData.rsi}</div>
+        <div class="rsi-label" style="background:rgba(0,0,0,0.2);color:${rsiColor}">${rsiLabel}</div>
+        <div class="rsi-bar-track" style="width:100%">
+          <div class="rsi-marker" style="left:${marketData.rsi}%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;width:100%;font-size:10px;color:var(--text3);font-family:var(--mono)"><span>0</span><span>30</span><span>70</span><span>100</span></div>
+      </div>
+    </div>
+  `;
+  panel.appendChild(bottomGrid);
+  setTimeout(() => {
+    const ctxS = document.getElementById('chart-sentiment').getContext('2d');
+    currentCharts['sentiment'] = new Chart(ctxS, { type: 'bar', data: charts.sentimentChart.data, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins }, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: -1, max: 1 } } } });
+  }, 50);
+
+  // EDA insights
+  const insightCard = document.createElement('div');
+  insightCard.className = 'card fade-in';
+  insightCard.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">EDA Insights</span>
+      <span style="font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:rgba(16,232,152,0.1);color:var(--green)">Momentum: ${edaInsights.momentumSignal || 'N/A'}</span>
+    </div>
+    <div class="insight-list">${(edaInsights.insights || []).map(i => `<div class="insight-item"><div class="insight-dot"></div><span>${i}</span></div>`).join('')}</div>
+    ${(edaInsights.riskFlags || []).length ? `<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">${(edaInsights.riskFlags || []).map(r => `<div class="risk-flag">⚠ ${r}</div>`).join('')}</div>` : ''}
+  `;
+  panel.appendChild(insightCard);
+}
+
+// ─────────────────────────────────────────
+// RENDER: Recommendation
+// ─────────────────────────────────────────
+function renderRecommendation(rec, panel) {
+  const div2 = document.createElement('div');
+  div2.className = 'section-divider fade-in';
+  div2.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">③ trade-recommendation</span><div class="section-divider-line"></div>`;
+  panel.appendChild(div2);
+
+  const rrColor = rec.riskReward >= 2 ? 'var(--green)' : rec.riskReward >= 1.5 ? 'var(--amber)' : 'var(--red)';
+
+  const recCard = document.createElement('div');
+  recCard.className = 'rec-card fade-in';
+  recCard.style.background = `linear-gradient(135deg, var(--bg2), ${rec.actionColor}15)`;
+  recCard.style.borderColor = `${rec.actionColor}40`;
+  recCard.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="rec-action" style="color:${rec.actionColor}">${rec.action}</div>
+        <div class="rec-confidence" style="color:var(--text2)">${rec.ticker} · ${rec.confidence}% Confidence</div>
+        <div style="width:180px">
+          <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
+        <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
+      </div>
+    </div>
+
+    <div class="price-targets">
+      <div class="target-item">
+        <div class="target-label">ENTRY</div>
+        <div class="target-value" style="color:var(--cyan)">$${rec.entry?.toFixed(2)}</div>
+      </div>
+      <div class="target-item">
+        <div class="target-label">STOP LOSS</div>
+        <div class="target-value" style="color:var(--red)">$${rec.stopLoss?.toFixed(2)}</div>
+      </div>
+      <div class="target-item">
+        <div class="target-label">TAKE PROFIT</div>
+        <div class="target-value" style="color:var(--green)">$${rec.takeProfit?.toFixed(2)}</div>
+      </div>
+    </div>
+    <div class="rr-badge" style="background:${rrColor}15;color:${rrColor};border:1px solid ${rrColor}30">Risk/Reward: ${rec.riskReward}:1 · ${rec.timeHorizon} term</div>
+
+    ${rec.rationale ? `<p style="font-size:13px;line-height:1.6;color:var(--text2);margin-top:14px">${rec.rationale}</p>` : ''}
+
+    <div style="margin-top:16px">
+      <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">Signal Breakdown</div>
+      <div class="signal-grid">
+        ${(rec.signals || []).map(s => `
+          <div class="signal-row">
+            <span class="signal-pts ${s.points > 0 ? 'pos' : 'neg'}">${s.points > 0 ? '+' : ''}${s.points}</span>
+            <span class="signal-name">${s.name}</span>
+            <span class="signal-reason">${s.reason}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    ${(rec.keyRisks || []).length ? `
+      <div style="margin-top:14px">
+        <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.08em">Key Risks</div>
+        ${rec.keyRisks.map(r => `<div class="risk-flag" style="margin-bottom:5px">⚠ ${r}</div>`).join('')}
+      </div>
+    ` : ''}
+
+    <div class="disclaimer">${rec.disclaimer}</div>
+  `;
+  panel.appendChild(recCard);
+  panel.scrollTop = 0;
+}
+
+function destroyCharts() {
+  Object.values(currentCharts).forEach(c => { try { c.destroy(); } catch(e) {} });
+  currentCharts = {};
+}
+
+// Enter key sends
+document.getElementById('chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+</script>
+</body>
+</html>
