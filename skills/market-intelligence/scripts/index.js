@@ -2,12 +2,332 @@ const { callDeepSeek } = require('../../../backend/lib/llm');
 const { loadSkills } = require('../../../backend/lib/skill-loader');
 const { normalizeTicker, parseJsonResponse } = require('../../../backend/lib/utils');
 const config = require('../../../backend/lib/config');
+const { calculateAllIndicators } = require('../../../backend/lib/technical-indicators');
 
 const skills = loadSkills();
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+// LLM batch sentiment scorer — scores all headlines in one API call
+async function scoreSentimentsWithLLM(headlines) {
+  if (!headlines || headlines.length === 0) return [];
+  try {
+    const numbered = headlines.map((h, i) => `${i + 1}. ${h}`).join('\n');
+    const system = 'You are a financial news sentiment analyst. For each headline, return a sentiment score between -1.0 (very negative) and +1.0 (very positive) from an equity investor perspective. 0 is neutral.';
+    const user = `Score each headline. Return ONLY a JSON array of numbers in the same order, e.g. [0.6, -0.3, 0.1].\n\n${numbered}`;
+    const raw = await callDeepSeek(system, user, 0.1, 200);
+    const cleaned = String(raw || '').replace(/```json|```/g, '').trim();
+    const scores = JSON.parse(cleaned);
+    if (!Array.isArray(scores)) return headlines.map(() => 0);
+    return scores.map(s => Math.max(-1, Math.min(1, Number(s) || 0)));
+  } catch {
+    // Fallback: neutral if LLM fails
+    return headlines.map(() => 0);
+  }
+}
+
+// Fetch news from Finnhub
+async function fetchFinnhubNews(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const to = new Date().toISOString().split('T')[0];
+    const from = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString().split('T')[0];
+    const url = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return null;
+
+    const articles = data.slice(0, 5);
+    const headlines = articles.map(a => a.headline || '');
+    const scores = await scoreSentimentsWithLLM(headlines);
+
+    return articles.map((article, i) => ({
+      title: article.headline || '',
+      source: article.source || 'Finnhub',
+      sentiment: scores[i] ?? 0,
+      hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
+    }));
+  } catch (error) {
+    console.error('Finnhub news fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch analyst recommendation from Finnhub
+async function fetchFinnhubRecommendations(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/recommendation?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    // Latest recommendation data
+    const latest = data[0];
+    return {
+      strongBuy: safeNumber(latest.strongBuy),
+      buy: safeNumber(latest.buy),
+      hold: safeNumber(latest.hold),
+      sell: safeNumber(latest.sell),
+      strongSell: safeNumber(latest.strongSell),
+    };
+  } catch (error) {
+    console.error('Finnhub recommendations fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch company profile and fundamentals from Finnhub
+async function fetchFinnhubProfile(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return {
+      name: data.name || '',
+      sector: data.finnhubIndustry || data.industry || '',
+      marketCap: safeNumber(data.marketCapitalization) * 1e6 || 0,
+    };
+  } catch (error) {
+    console.error('Finnhub profile fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch quote and metrics from Finnhub (includes PE, EPS via extended data)
+async function fetchFinnhubQuote(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    // Note: Finnhub quote endpoint has limited fundamental data; will combine with metrics endpoint
+    return data;
+  } catch (error) {
+    console.error('Finnhub quote fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch comprehensive metrics from Finnhub (includes PE, EPS) 
+async function fetchFinnhubMetrics(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const metrics = data.metric || {};
+    return {
+      pe: safeNumber(metrics.peNormalizedAnnual),
+      eps: safeNumber(metrics.epsBasicExclExtraordinaryAnnual),
+    };
+  } catch (error) {
+    console.error('Finnhub metrics fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch analyst price targets from Finnhub
+async function fetchFinnhubPriceTarget(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/price-target?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return {
+      targetHigh: safeNumber(data.targetHigh),
+      targetLow: safeNumber(data.targetLow),
+      targetMean: safeNumber(data.targetMean),
+    };
+  } catch (error) {
+    console.error('Finnhub price target fetch failed:', error.message);
+    return null;
+  }
+}
+
+
+// Singleton Yahoo Finance instance
+let _yf = null;
+function getYahooFinance() {
+  if (!_yf) {
+    const path = require('path');
+    // yahoo-finance2 is installed in backend/node_modules; resolve explicitly
+    const yf2Path = path.resolve(__dirname, '../../../backend/node_modules/yahoo-finance2');
+    const YF = require(yf2Path).default;
+    _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+  }
+  return _yf;
+}
+
+async function fetchYahooFinanceData(ticker) {
+  const yf = getYahooFinance();
+  const to = new Date();
+  const from = new Date(Date.now() - 120 * 24 * 3600 * 1000);
+
+  const [history, summary] = await Promise.all([
+    yf.historical(ticker, {
+      period1: from.toISOString().split('T')[0],
+      period2: to.toISOString().split('T')[0],
+      interval: '1d',
+    }),
+    yf.quoteSummary(ticker, {
+      modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend'],
+    }),
+  ]);
+
+  if (!history || history.length < 5) {
+    throw new Error(`Yahoo Finance returned insufficient history for ${ticker}`);
+  }
+
+  const priceMod = summary.price || {};
+  const fd = summary.financialData || {};
+  const ks = summary.defaultKeyStatistics || {};
+  const sp = summary.summaryProfile || {};
+  const rt = summary.recommendationTrend?.trend?.[0] || {};
+
+  const priceHistory = history.map((bar) => ({
+    date: new Date(bar.date).toISOString().split('T')[0],
+    open: parseFloat(safeNumber(bar.open).toFixed(4)),
+    high: parseFloat(safeNumber(bar.high).toFixed(4)),
+    low: parseFloat(safeNumber(bar.low).toFixed(4)),
+    close: parseFloat(safeNumber(bar.close).toFixed(4)),
+    volume: Math.floor(safeNumber(bar.volume)),
+  }));
+
+  const closes = priceHistory.map((d) => d.close);
+  const volumes = priceHistory.map((d) => d.volume);
+  const highs = priceHistory.map((d) => d.high);
+  const lows = priceHistory.map((d) => d.low);
+
+  const price = safeNumber(priceMod.regularMarketPrice || closes[closes.length - 1]);
+  const prevClose = safeNumber(priceMod.regularMarketPreviousClose || closes[closes.length - 2] || price);
+  const change = price - prevClose;
+  const changePercent = prevClose === 0 ? 0 : (change / prevClose) * 100;
+
+  const ma20 = closes.slice(-20).reduce((s, v) => s + v, 0) / Math.min(20, closes.length);
+  const ma50 = closes.slice(-50).reduce((s, v) => s + v, 0) / Math.min(50, closes.length);
+  const ma200 = closes.length >= 200
+    ? closes.slice(-200).reduce((s, v) => s + v, 0) / 200
+    : ma50;
+
+  const gains = [];
+  const losses = [];
+  for (let i = 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? Math.abs(diff) : 0);
+  }
+  const avgGain = gains.slice(-14).reduce((s, v) => s + v, 0) / 14;
+  const avgLoss = losses.slice(-14).reduce((s, v) => s + v, 0) / 14;
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  const rsi = parseFloat((100 - 100 / (1 + rs)).toFixed(1));
+  const avgVolume = volumes.slice(-20).reduce((s, v) => s + v, 0) / Math.min(20, volumes.length);
+  const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
+
+  // News from Finnhub is US-focused; for non-US tickers use Yahoo Finance search news fallback
+  const yahooNews = await (async () => {
+    try {
+      const results = await yf.search(ticker, { newsCount: 5, quotesCount: 0 });
+      const items = (results.news || []).slice(0, 5);
+      const headlines = items.map((n) => n.title || '');
+      const scores = await scoreSentimentsWithLLM(headlines);
+      return items.map((n, i) => ({
+        title: n.title || '',
+        source: n.publisher || 'Yahoo Finance',
+        sentiment: scores[i] ?? 0,
+        hoursAgo: (() => {
+          const ts = n.providerPublishTime;
+          if (!ts) return 0;
+          // Yahoo Finance returns providerPublishTime in seconds (Unix epoch)
+          const publishMs = ts > 1e12 ? ts : ts * 1000;
+          return Math.max(0, Math.round((Date.now() - publishMs) / 3600000));
+        })(),
+      }));
+    } catch {
+      return [];
+    }
+  })();
+
+  const sentimentScore = yahooNews.length > 0
+    ? parseFloat((yahooNews.reduce((s, n) => s + (n.sentiment || 0), 0) / yahooNews.length).toFixed(2))
+    : 0;
+  const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
+
+  const targetMean = safeNumber(fd.targetMeanPrice);
+  const targetHigh = safeNumber(fd.targetHighPrice) || (price * 1.12);
+  const targetLow = safeNumber(fd.targetLowPrice) || (price * 0.9);
+  const effectiveTargetMean = targetMean || (targetHigh + targetLow) / 2;
+
+  return {
+    ticker,
+    name: priceMod.longName || priceMod.shortName || `${ticker}`,
+    sector: sp.sector || sp.industry || 'Unknown',
+    currency: priceMod.currency || 'USD',
+    exchange: priceMod.exchangeName || '',
+    price: parseFloat(price.toFixed(4)),
+    prevClose: parseFloat(prevClose.toFixed(4)),
+    change: parseFloat(change.toFixed(4)),
+    changePercent: parseFloat(changePercent.toFixed(2)),
+    volume: Math.floor(safeNumber(priceMod.regularMarketVolume || volumes[volumes.length - 1])),
+    avgVolume: Math.floor(avgVolume),
+    high52w: parseFloat(Math.max(...highs).toFixed(4)),
+    low52w: parseFloat(Math.min(...lows).toFixed(4)),
+    marketCap: safeNumber(priceMod.marketCap),
+    pe: safeNumber(ks.forwardPE || ks.trailingPE),
+    eps: safeNumber(ks.trailingEps),
+    ma20: parseFloat(ma20.toFixed(4)),
+    ma50: parseFloat(ma50.toFixed(4)),
+    ma200: parseFloat(ma200.toFixed(4)),
+    rsi,
+    trend,
+    sentimentScore,
+    sentimentLabel,
+    analystConsensus: {
+      strongBuy: safeNumber(rt.strongBuy),
+      buy: safeNumber(rt.buy),
+      hold: safeNumber(rt.hold),
+      sell: safeNumber(rt.sell),
+      strongSell: safeNumber(rt.strongSell),
+      targetHigh: parseFloat(targetHigh.toFixed(4)),
+      targetLow: parseFloat(targetLow.toFixed(4)),
+      targetMean: parseFloat(effectiveTargetMean.toFixed(4)),
+      upside: effectiveTargetMean > 0 ? parseFloat((((effectiveTargetMean - price) / price) * 100).toFixed(1)) : 0,
+    },
+    news: yahooNews,
+    priceHistory,
+    technicalIndicators: calculateAllIndicators(priceHistory),
+    collectedAt: new Date().toISOString(),
+    dataSource: 'yahoo-finance',
+    fallbackReason: null,
+  };
 }
 
 function generateMockMarketData(ticker) {
@@ -36,8 +356,8 @@ function generateMockMarketData(ticker) {
   const changePercent = (change / prevClose) * 100;
 
   const priceHistory = [];
-  let syntheticPrice = base * 0.92;
-  for (let index = 30; index >= 0; index -= 1) {
+  let syntheticPrice = base * 0.78;
+  for (let index = 99; index >= 0; index -= 1) {
     syntheticPrice = syntheticPrice * (1 + rand(-0.025, 0.028));
     const date = new Date();
     date.setDate(date.getDate() - index);
@@ -122,6 +442,7 @@ function generateMockMarketData(ticker) {
     },
     news,
     priceHistory,
+    technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'mock',
     fallbackReason: null,
@@ -161,7 +482,7 @@ async function fetchAlphaVantageMarketData(ticker) {
 
   const getVolume = (candle) => safeNumber(candle['6. volume'] ?? candle['5. volume']);
 
-  const recentDatesAsc = allDates.slice(-31);
+  const recentDatesAsc = allDates.slice(-100);
   const priceHistory = recentDatesAsc.map((date) => {
     const candle = series[date] || {};
     return {
@@ -215,16 +536,64 @@ async function fetchAlphaVantageMarketData(ticker) {
   const avgVolume = volumes.slice(-20).reduce((sum, value) => sum + value, 0) / Math.max(1, Math.min(volumes.length, 20));
   const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
 
-  // We only fetch price candles here; sentiment/news/consensus remain placeholders unless another provider is wired.
-  const sentimentScore = 0;
-  const targetHigh = price * 1.12;
-  const targetLow = price * 0.9;
-  const targetMean = (targetHigh + targetLow) / 2;
+  // Fetch Finnhub data (news, sentiment, analyst consensus, fundamentals)
+  let finnhubProfile = null;
+  let finnhubMetrics = null;
+  let finnhubNews = [];
+  let finnhubRecommendations = null;
+  let finnhubPriceTarget = null;
+
+  if (config.finnhubApiKey) {
+    [finnhubProfile, finnhubMetrics, finnhubNews, finnhubRecommendations, finnhubPriceTarget] = await Promise.all([
+      fetchFinnhubProfile(ticker),
+      fetchFinnhubMetrics(ticker),
+      fetchFinnhubNews(ticker),
+      fetchFinnhubRecommendations(ticker),
+      fetchFinnhubPriceTarget(ticker),
+    ]);
+  }
+
+  // Use Finnhub data if available, otherwise use fallbacks
+  const name = finnhubProfile?.name || `${ticker} Corp.`;
+  const sector = finnhubProfile?.sector || 'Unknown';
+  const pe = finnhubMetrics?.pe || 0;
+  const eps = finnhubMetrics?.eps || 0;
+  const marketCap = finnhubProfile?.marketCap || 0;
+
+  // Compute sentiment from news headlines (guard against null return from Finnhub)
+  const news = Array.isArray(finnhubNews) && finnhubNews.length > 0 ? finnhubNews : [];
+  const sentimentScore = news.length > 0
+    ? parseFloat((news.reduce((sum, n) => sum + (n.sentiment || 0), 0) / news.length).toFixed(2))
+    : 0;
+  const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
+
+  // Use analyst recommendations if available
+  const consensus = finnhubRecommendations || {
+    strongBuy: 0,
+    buy: 0,
+    hold: 0,
+    sell: 0,
+    strongSell: 0,
+  };
+
+  // Use real price targets from Finnhub if available, otherwise use naive fallback
+  let targetHigh, targetLow, targetMean;
+  if (finnhubPriceTarget && finnhubPriceTarget.targetHigh > 0 && finnhubPriceTarget.targetLow > 0) {
+    targetHigh = finnhubPriceTarget.targetHigh;
+    targetLow = finnhubPriceTarget.targetLow;
+    targetMean = finnhubPriceTarget.targetMean || (targetHigh + targetLow) / 2;
+  } else {
+    // Fallback: naive estimation based on current price
+    targetHigh = price * 1.12;
+    targetLow = price * 0.9;
+    targetMean = (targetHigh + targetLow) / 2;
+  }
+
 
   return {
     ticker,
-    name: `${ticker} Corp.`,
-    sector: 'Unknown',
+    name,
+    sector,
     price: parseFloat(price.toFixed(2)),
     prevClose: parseFloat(prevClose.toFixed(2)),
     change: parseFloat(change.toFixed(2)),
@@ -233,31 +602,35 @@ async function fetchAlphaVantageMarketData(ticker) {
     avgVolume: Math.floor(avgVolume),
     high52w: parseFloat((Math.max(...highs)).toFixed(2)),
     low52w: parseFloat((Math.min(...lows)).toFixed(2)),
-    marketCap: 0,
-    pe: 0,
-    eps: 0,
+    marketCap,
+    pe,
+    eps,
     ma20: parseFloat(ma20.toFixed(2)),
     ma50: parseFloat(ma50.toFixed(2)),
     ma200: parseFloat(ma200.toFixed(2)),
     rsi,
     trend,
     sentimentScore,
-    sentimentLabel: 'NEUTRAL',
+    sentimentLabel,
     analystConsensus: {
-      strongBuy: 0,
-      buy: 0,
-      hold: 0,
-      sell: 0,
-      strongSell: 0,
+      ...consensus,
       targetHigh: parseFloat(targetHigh.toFixed(2)),
       targetLow: parseFloat(targetLow.toFixed(2)),
       targetMean: parseFloat(targetMean.toFixed(2)),
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
-    news: [],
+    news,
     priceHistory,
+    technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'alpha-vantage',
+    finnhubData: {
+      profile: !!finnhubProfile,
+      metrics: !!finnhubMetrics,
+      news: news.length,
+      recommendations: !!finnhubRecommendations,
+      priceTarget: !!finnhubPriceTarget,
+    },
   };
 }
 
@@ -276,9 +649,14 @@ function buildFallbackAnalysis(ticker, marketData) {
 
 async function runMarketIntelligence({ ticker }, dependencies = {}) {
   const cleanTicker = normalizeTicker(ticker);
+  const isInternational = cleanTicker.includes('.');
   let marketData;
   try {
-    marketData = await fetchAlphaVantageMarketData(cleanTicker);
+    if (isInternational) {
+      marketData = await fetchYahooFinanceData(cleanTicker);
+    } else {
+      marketData = await fetchAlphaVantageMarketData(cleanTicker);
+    }
   } catch (error) {
     marketData = generateMockMarketData(cleanTicker);
     marketData.fallbackReason = error && error.message ? error.message : 'Live market API failed';

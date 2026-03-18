@@ -8,4 +8,6 @@ module.exports = {
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
   deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1',
   alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || 'demo',
+  finnhubApiKey: process.env.FINNHUB_API_KEY || null,
+  newsApiKey: process.env.NEWS_API_KEY || null,
 };

@@ -1,6 +1,7 @@
 const { runMarketIntelligence } = require('../../skills/market-intelligence/scripts');
 const { runEdaVisualAnalysis } = require('../../skills/eda-visual-analysis/scripts');
 const { runTradeRecommendation } = require('../../skills/trade-recommendation/scripts');
+const { runPortfolioOptimization } = require('../../skills/portfolio-optimization/scripts');
 
 async function runFullAnalysis({ ticker }) {
   const marketIntelligence = await runMarketIntelligence({ ticker });
@@ -18,6 +19,21 @@ async function runFullAnalysis({ ticker }) {
   };
 }
 
+async function runPortfolioAnalysis({ tickers, timeHorizon = 'MEDIUM' }) {
+  const portfolioOptimization = await runPortfolioOptimization({
+    tickers,
+    useMarketData: [], // Will fetch live data
+    timeHorizon,
+  });
+
+  return {
+    tickers,
+    timeHorizon,
+    portfolioOptimization,
+  };
+}
+
 module.exports = {
   runFullAnalysis,
+  runPortfolioAnalysis,
 };

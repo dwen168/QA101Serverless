@@ -5,7 +5,10 @@ const { z } = require('zod');
 const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
 const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
 const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
-const { runFullAnalysis } = require('./lib/pipeline');
+const { runPortfolioOptimization } = require('../skills/portfolio-optimization/scripts');
+const { runBacktest } = require('../skills/backtesting/scripts');
+const { runFullAnalysis, runPortfolioAnalysis } = require('./lib/pipeline');
+const config = require('./lib/config');
 
 const server = new McpServer({
   name: 'quantbot',
@@ -90,6 +93,64 @@ server.tool(
   async ({ ticker }) => {
     try {
       return asToolResult(await runFullAnalysis({ ticker }));
+    } catch (error) {
+      return asToolError(error);
+    }
+  }
+);
+
+server.tool(
+  'portfolio_optimization',
+  'Analyze a portfolio of stocks: compute multi-factor scores, correlation matrix, sector rotation, and ranked recommendations.',
+  {
+    tickers: z.array(z.string()).describe('Array of stock ticker symbols, e.g. ["AAPL", "MSFT", "GOOGL", "NVDA", "TSLA"].'),
+    timeHorizon: z.enum(['SHORT', 'MEDIUM', 'LONG']).optional().default('MEDIUM').describe('Investment time horizon: SHORT (< 2 weeks), MEDIUM (2-8 weeks), LONG (> 2 months).'),
+  },
+  async ({ tickers, timeHorizon }) => {
+    try {
+      return asToolResult(await runPortfolioOptimization({ tickers, useMarketData: [], timeHorizon }));
+    } catch (error) {
+      return asToolError(error);
+    }
+  }
+);
+
+server.tool(
+  'full_portfolio_analysis',
+  'Run full portfolio analysis pipeline: fetch market data for all tickers and generate optimized portfolio recommendations.',
+  {
+    tickers: z.array(z.string()).describe('Array of stock ticker symbols.'),
+    timeHorizon: z.enum(['SHORT', 'MEDIUM', 'LONG']).optional().default('MEDIUM').describe('Investment time horizon.'),
+  },
+  async ({ tickers, timeHorizon }) => {
+    try {
+      return asToolResult(await runPortfolioAnalysis({ tickers, timeHorizon }));
+    } catch (error) {
+      return asToolError(error);
+    }
+  }
+);
+
+server.tool(
+  'backtesting',
+  'Backtest a trading strategy on historical data. Returns performance metrics: Sharpe ratio, max drawdown, win rate, trade log.',
+  {
+    ticker: z.string().describe('Stock ticker symbol to backtest, e.g., AAPL.'),
+    strategyName: z.enum(['trade-recommendation', 'macd-bb', 'rsi-ma']).optional().default('trade-recommendation').describe('Strategy type: trade-recommendation (15+ signals), macd-bb, or rsi-ma.'),
+    startDate: z.string().describe('Backtest start date in YYYY-MM-DD format, e.g., 2025-01-01.'),
+    endDate: z.string().describe('Backtest end date in YYYY-MM-DD format, e.g., 2026-03-18.'),
+    initialCapital: z.number().optional().default(100000).describe('Starting portfolio value in USD.'),
+  },
+  async ({ ticker, strategyName, startDate, endDate, initialCapital }) => {
+    try {
+      return asToolResult(await runBacktest({
+        ticker,
+        strategyName,
+        startDate,
+        endDate,
+        initialCapital,
+        apiKey: config.alphaVantageApiKey,
+      }));
     } catch (error) {
       return asToolError(error);
     }

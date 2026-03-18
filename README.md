@@ -1,6 +1,6 @@
 # QuantBot — AI Quantitative Analysis Demo
 
-An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with three specialized skills.
+An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with four specialized skills: single-stock analysis and multi-stock portfolio optimization.
 
 ## Architecture
 
@@ -20,12 +20,17 @@ QA101/
 │   │   │   └── index.js
 │   │   ├── assets/
 │   │   └── references/chart-types.md
-│   └── trade-recommendation/
+│   ├── trade-recommendation/
+│   │   ├── SKILL.md
+│   │   ├── scripts/
+│   │   │   └── index.js
+│   │   ├── assets/
+│   │   └── references/risk-factors.md
+│   └── portfolio-optimization/
 │       ├── SKILL.md
 │       ├── scripts/
 │       │   └── index.js
-│       ├── assets/
-│       └── references/risk-factors.md
+│       └── references/multi-factor-model.md
 ├── backend/
 │   ├── package.json
 │   ├── server.js                 # Express HTTP API
@@ -70,10 +75,17 @@ Edit `.env`:
 ```env
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
+FINNHUB_API_KEY=your_finnhub_api_key_here
+NEWS_API_KEY=your_newsapi_api_key_here
 PORT=3001
 ```
 
-Get your DeepSeek API key at: https://platform.deepseek.com/api_keys
+Get your API keys:
+- **DeepSeek API key**: https://platform.deepseek.com/api_keys
+- **Alpha Vantage API key**: https://www.alphavantage.co/api/ (free tier: 25 req/day)
+- **Finnhub API key**: https://finnhub.io/dashboard/api-token (free tier: 60 req/min)
+- **NewsAPI key**: https://newsapi.org/account (free tier: 100 req/day)
 
 ### 2. Install backend dependencies
 ```bash
@@ -91,13 +103,13 @@ This starts the API and serves the frontend at:
 - http://localhost:3001/
 - Health check: http://localhost:3001/api/health
 
-### 4. Start the MCP server (separate terminal)
-Open a second terminal, go to `backend/`, then run:
+### 4. Start the MCP server (optional, separate terminal)
+If you want to expose the QuantBot skills as MCP tools for compatible AI clients, you can start the MCP server. Open a second terminal, go to `backend/`, then run:
 ```bash
 npm run mcp
 ```
 
-This starts a local stdio MCP server that exposes the QuantBot skills as MCP tools for compatible AI clients.
+This is not required if you are using the browser-based UI.
 
 ### 5. Open the frontend
 Open http://localhost:3001/ in your browser.
@@ -121,10 +133,12 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 
 ### Skill 1: market-intelligence
 - Validates ticker symbol
-- Fetches price data, moving averages, RSI (Alpha Vantage / mock)
-- Retrieves news headlines with sentiment scores
-- Aggregates analyst consensus ratings
-- Returns structured `MarketIntelligenceReport`
+- Fetches price data, moving averages, RSI from Alpha Vantage (live or mock fallback)
+- Calculates advanced technical indicators: **MACD, Bollinger Bands, KDJ, OBV, VWAP**
+- Retrieves news headlines from Finnhub with rule-based sentiment scoring (VADER-like)
+- Aggregates analyst consensus ratings from Finnhub
+- Pulls real P/E, EPS, and market cap from Finnhub when available
+- Returns structured `MarketIntelligenceReport` with full technical + fundamental + sentiment data
 
 ### Skill 2: eda-visual-analysis
 - Accepts `MarketIntelligenceReport` as input
@@ -134,24 +148,75 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 - Returns chart specs + textual insights
 
 ### Skill 3: trade-recommendation
-- Scores 8+ signals (trend, RSI, sentiment, analyst consensus, volume, momentum)
-- Maps score to BUY/HOLD/SELL with confidence %
-- Computes entry, stop-loss, take-profit, risk/reward
+- Scores 15+ signals: trend, RSI, sentiment, analyst consensus, momentum, **+ MACD, Bollinger Bands, KDJ, OBV, VWAP**
+- Maps aggregate score to BUY/HOLD/SELL with confidence %
+- Computes exit levels using **14-day ATR** (more accurate than 52-week range):
+  - Stop-loss = entry − (ATR14 × 1.5)
+  - Take-profit = entry + (ATR14 × 2.5)
+- Calculates **Value at Risk (VaR)** for 1-day maximum loss at 95% confidence
 - LLM generates rationale and risk factors
-- Returns structured `TradeRecommendation`
+- Returns structured `TradeRecommendation` with multi-indicator validation + risk metrics
 
-## Customization
+### Skill 4: portfolio-optimization
+- Accepts array of tickers (e.g., 5–20 stocks)
+- Computes multi-factor scores: momentum, quality, risk-adjusted
+- Constructs correlation matrix and identifies diversification gaps
+- Groups stocks by sector and ranks sector rotation opportunities
+- Assigns portfolio actions (STRONG BUY → SELL) with recommended allocations
+- LLM generates portfolio thesis, sector rotation insight, and rebalancing recommendations
+- Returns ranked holdings, correlation matrix, and diversification metrics
 
-### Adding real market data
-Replace the `generateMockMarketData()` function in `skills/market-intelligence/scripts/index.js`:
-- **Alpha Vantage** (free): https://www.alphavantage.co/documentation/
-- **Yahoo Finance** (unofficial): `npm install yahoo-finance2`
+### Customization
+
+### Price data sources (Alpha Vantage handles this)
+- **Alpha Vantage** (integrated, free): https://www.alphavantage.co/documentation/
+- **Yahoo Finance** (alternative, unofficial): `npm install yahoo-finance2`
 - **Polygon.io**: https://polygon.io/
 
-### Adding real news
-Replace the mock `newsHeadlines` array:
-- **NewsAPI**: https://newsapi.org/ (100 requests/day free)
-- **Finnhub**: https://finnhub.io/ (has built-in stock news endpoint)
+### Sentiment & News (Finnhub handles this)
+**Finnhub integration is built-in** for:
+- Real news headlines with rule-based sentiment scoring
+- Analyst recommendation consensus and price targets
+- Company fundamentals (P/E, EPS, market cap)
+
+Add a `FINNHUB_API_KEY=your_key` to `.env` to enable. Free tier: 60 req/min.
+
+If you want to swap sentiment providers:
+- Replace `scoreHeadlineSentiment()` in `skills/market-intelligence/scripts/index.js` with VADER (Python via `child_process`) or HuggingFace API (FinBERT)
+- Or integrate **NewsAPI** for additional headline sources
+
+### Signal Weights Calibration (Advanced)
+The `trade-recommendation` skill uses 12 signals (MA50/MA200, RSI, sentiment, analyst consensus, MACD, BB, KDJ, OBV, VWAP) to score trades.
+
+By default, weights are **hardcoded experience values** (e.g., Price > MA50 = +2 points).
+
+To **learn optimal weights from historical data** using XGBoost:
+
+```bash
+# 1. Install Python dependencies
+pip install xgboost scikit-learn pandas numpy requests
+
+# 2. Run calibration on historical data (e.g., 500 days of 7 stocks)
+cd backend
+npm run calibrate-weights -- --symbols AAPL,MSFT,GOOGL,NVDA,TSLA,AMD,NFLX --days 500
+
+# 3. Outputs: lib/signal-weights.json
+#    - Model metrics (Accuracy, F1, AUC)
+#    - Learned weights for each signal
+#    - Feature importance scores
+
+# 4. Verify by checking API response
+node server.js
+# API response now includes weightingMetadata with model version and metrics
+```
+
+For details, see [SIGNAL_WEIGHTS_CALIBRATION.md](backend/docs/SIGNAL_WEIGHTS_CALIBRATION.md).
+
+**Benefits:**
+- Replace intuition-based weights with statistically validated ones
+- Measure model quality (AUC > 0.65 is good for 5-day prediction)
+- Create sector-specific weight sets (Tech vs Finance vs Healthcare)
+- Continuously retrain as new market data arrives
 
 ### Extending skills
 Create new skill folders following the agentskills.io spec:
@@ -165,19 +230,22 @@ touch skills/my-new-skill/SKILL.md
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/chat` | Main chatbot (DeepSeek routing) |
-| POST | `/api/skills/market-intelligence` | Skill 1 |
-| POST | `/api/skills/eda-visual-analysis` | Skill 2 |
-| POST | `/api/skills/trade-recommendation` | Skill 3 |
+| POST | `/api/skills/market-intelligence` | Single-stock market analysis |
+| POST | `/api/skills/eda-visual-analysis` | Single-stock visual insights |
+| POST | `/api/skills/trade-recommendation` | Single-stock trade signal |
+| POST | `/api/skills/portfolio-optimization` | Multi-stock portfolio ranking & diversification |
 | GET | `/api/health` | Health check |
 
 ## MCP Tools
 
 The MCP server exposes these tools over stdio:
 
-- `market_intelligence`
-- `eda_visual_analysis`
-- `trade_recommendation`
-- `full_stock_analysis`
+- `market_intelligence` — Single ticker analysis
+- `eda_visual_analysis` — Visual analysis from market data
+- `trade_recommendation` — Trade signal for single stock
+- `full_stock_analysis` — Full pipeline for single stock
+- `portfolio_optimization` — Multi-stock ranking and sector rotation
+- `full_portfolio_analysis` — Full portfolio analysis pipeline
 
 Example Claude Desktop / VS Code MCP config on Windows:
 

@@ -57,18 +57,29 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
     const cleaned = String(content || '').replace(/```json|```/g, '').trim();
     return JSON.parse(cleaned);
   } catch {
-    const tickerMatch = String(message || '').toUpperCase().match(/\b(AAPL|TSLA|NVDA|MSFT|AMZN|GOOGL|META|[A-Z]{2,5})\b/);
-    if (tickerMatch && String(message || '').toLowerCase().match(/analyz|buy|sell|recommend|look at|check|research/)) {
+    // Fallback: extract ticker from message
+    // Matches: US tickers (AAPL, TSLA, CBA), international (CBA.AX, 7203.T, HSBA.L), NASDAQ/NYSE codes
+    const msg = String(message || '').toUpperCase().trim();
+    
+    // Pattern: 1-6 alphanumeric chars, optionally followed by dot and 1-3 letter exchange code
+    const tickerMatch = msg.match(/\b([A-Z0-9]{1,6}(?:\.[A-Z]{1,3})?)\b/);
+    
+    // Check if message looks like a ticker query (ticker alone, or with action keywords)
+    const hasActionKeyword = msg.toLowerCase().match(/analyz|buy|sell|recommend|look at|check|research|price|news|target|opinion|should i|what.?s|performance/);
+    const isTickerOnly = tickerMatch && msg.split(/\s+/).length <= 2; // Just ticker, maybe with one word
+    
+    if (tickerMatch && (hasActionKeyword || isTickerOnly)) {
+      const ticker = tickerMatch[1];
       return {
-        message: `I'll analyze ${tickerMatch[1]} for you! Running all three skills now...`,
+        message: `I'll analyze ${ticker} for you! Running all three skills now...`,
         action: 'ANALYZE_STOCK',
-        ticker: tickerMatch[1],
+        ticker: ticker,
         skillSequence: ['market-intelligence', 'eda-visual-analysis', 'trade-recommendation'],
       };
     }
 
     return {
-      message: 'I\'m QuantBot! Ask me to analyze any stock — try "Analyze AAPL" or "Should I buy NVDA?"',
+      message: 'I\'m QuantBot! Ask me to analyze any stock — try "Analyze AAPL", "CBA.AX", or "Should I buy NVDA?"',
       action: null,
       ticker: null,
     };

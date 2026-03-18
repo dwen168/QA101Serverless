@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QuantBot — AI Stock Analysis</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -197,8 +198,31 @@
   .signal-pts.neg { background: var(--red-dim); color: var(--red); }
   .signal-name { flex: 1; color: var(--text2); }
   .signal-reason { font-size: 11px; color: var(--text3); }
+  .signal-detail { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; margin-left: 28px; }
+  .detail-chip { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 3px; background: var(--bg); border: 1px solid var(--border); color: var(--text2); }
+  .detail-chip span { color: var(--text3); margin-right: 2px; }
+
+  /* ── Historical Patterns card ── */
+  .analog-row { display: grid; grid-template-columns: 90px 1fr 1fr 1fr; gap: 8px; align-items: center; font-size: 11px; font-family: var(--mono); padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .analog-row:last-child { border-bottom: none; }
+  .analog-date { color: var(--text3); }
+  .analog-ret { text-align: right; }
+  .analog-ret.pos { color: var(--green); }
+  .analog-ret.neg { color: var(--red); }
+  .pattern-stat { background: var(--bg3); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .pattern-stat-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; }
+  .pattern-stat-value { font-size: 16px; font-weight: 600; font-family: var(--mono); }
   .disclaimer { font-size: 10px; color: var(--text3); margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
   .rr-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--mono); padding: 3px 8px; border-radius: 4px; margin-top: 8px; }
+
+  /* ── Range selector ── */
+  .range-selector { display: flex; gap: 4px; }
+  .range-btn {
+    font-size: 10px; font-family: var(--mono); padding: 3px 8px;
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text3); cursor: pointer; transition: all 0.15s;
+  }
+  .range-btn:hover, .range-btn.active { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
 
   /* ── Loading ── */
   .loading-step { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; color: var(--text2); }
@@ -505,6 +529,18 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       </div>
     `;
     panel.appendChild(banner);
+  } else if (dataSource === 'yahoo-finance') {
+    const banner = document.createElement('div');
+    banner.className = 'fade-in';
+    banner.style.cssText = 'background:rgba(16,232,152,0.1);border:1px solid rgba(16,232,152,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+    banner.innerHTML = `
+      <span style="font-size:16px">✓</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:500;color:var(--green)">Live Market Data</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Yahoo Finance</div>
+      </div>
+    `;
+    panel.appendChild(banner);
   }
 
   // Divider
@@ -516,12 +552,28 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   // Ticker header
   const header = document.createElement('div');
   header.className = 'ticker-header fade-in';
+  
+  // Determine data source label and color
+  let sourceLabel = 'unknown';
+  let sourceColor = 'var(--text3)';
+  if (usedFallback) {
+    sourceLabel = 'mock data';
+    sourceColor = 'var(--amber)';
+  } else if (dataSource === 'alpha-vantage') {
+    sourceLabel = 'alpha vantage';
+    sourceColor = 'var(--green)';
+  } else if (dataSource === 'yahoo-finance') {
+    sourceLabel = 'yahoo finance';
+    sourceColor = 'var(--green)';
+  }
+  
   header.innerHTML = `
     <div class="ticker-main">
       <div class="ticker-left">
         <span class="ticker-symbol">${d.ticker}</span>
         <span class="ticker-name">${d.name}</span>
         <span class="ticker-sector">${d.sector}</span>
+        <span style="font-size:10px;color:${sourceColor};font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-left:8px;padding:2px 6px;background:rgba(255,255,255,0.05);border-radius:3px">${sourceLabel}</span>
       </div>
       <div class="ticker-right">
         <div class="ticker-price">$${fmtNum(d.price)}</div>
@@ -627,55 +679,107 @@ function renderEDA(charts, edaInsights, marketData, panel) {
     },
   };
 
-  // Price chart (full width)
+  // Price chart (full width — TradingView Lightweight Charts)
   const priceWrap = document.createElement('div');
   priceWrap.className = 'chart-full fade-in';
-  priceWrap.innerHTML = `<div class="chart-title">${charts.priceChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-price"></canvas></div>`;
+  priceWrap.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="chart-title" style="margin-bottom:0">${marketData.ticker} — Candlestick &amp; Volume</div>
+      <div class="range-selector">
+        <button class="range-btn" onclick="setTVRange(7,this)">1W</button>
+        <button class="range-btn active" onclick="setTVRange(30,this)">1M</button>
+        <button class="range-btn" onclick="setTVRange(90,this)">3M</button>
+        <button class="range-btn" onclick="setTVRange(180,this)">6M</button>
+        <button class="range-btn" onclick="setTVRange(365,this)">1Y</button>
+        <button class="range-btn" onclick="setTVRange(0,this)">All</button>
+      </div>
+    </div>
+    <div id="tv-price-container" style="height:280px"></div>
+  `;
   panel.appendChild(priceWrap);
   setTimeout(() => {
-    const ctx = document.getElementById('chart-price').getContext('2d');
-    currentCharts['price'] = new Chart(ctx, { type: 'line', data: charts.priceChart.data, options: { ...chartDefaults } });
+    const tvContainer = document.getElementById('tv-price-container');
+    const tvChart = LightweightCharts.createChart(tvContainer, {
+      autoSize: true,
+      height: 280,
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#7a8fb8', fontFamily: "'DM Mono', monospace", fontSize: 11 },
+      grid: { vertLines: { color: 'rgba(0,212,255,0.04)' }, horzLines: { color: 'rgba(0,212,255,0.04)' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: 'rgba(0,212,255,0.1)' },
+      timeScale: { borderColor: 'rgba(0,212,255,0.1)', timeVisible: false },
+      handleScroll: true, handleScale: true,
+    });
+
+    const candleSeries = tvChart.addCandlestickSeries({
+      upColor: '#10e898', downColor: '#ff4b6e',
+      borderUpColor: '#10e898', borderDownColor: '#ff4b6e',
+      wickUpColor: '#10e898', wickDownColor: '#ff4b6e',
+    });
+    const volSeries = tvChart.addHistogramSeries({
+      color: 'rgba(0,212,255,0.25)', priceFormat: { type: 'volume' }, priceScaleId: 'vol',
+    });
+    tvChart.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    const ma10S = tvChart.addLineSeries({ color: '#f59e0b', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+    const ma20S = tvChart.addLineSeries({ color: '#10b981', lineWidth: 1, lineStyle: 3, priceLineVisible: false, lastValueVisible: false });
+
+    const sorted = [...(marketData.priceHistory || [])].sort((a, b) => a.date < b.date ? -1 : 1);
+    const tvCandleData = sorted.map(d => {
+      const o = d.open || d.close, c = d.close;
+      return { time: d.date, open: o, high: Math.max(d.high || c, o, c), low: Math.min(d.low || c, o, c), close: c };
+    });
+    const tvVolData = sorted.map(d => ({
+      time: d.date, value: d.volume,
+      color: d.close >= d.open ? 'rgba(16,232,152,0.4)' : 'rgba(255,75,110,0.4)',
+    }));
+    const closes = sorted.map(d => d.close);
+    const tvMa10 = [], tvMa20 = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (i >= 9) tvMa10.push({ time: sorted[i].date, value: parseFloat((closes.slice(i-9,i+1).reduce((s,v)=>s+v,0)/10).toFixed(2)) });
+      if (i >= 19) tvMa20.push({ time: sorted[i].date, value: parseFloat((closes.slice(i-19,i+1).reduce((s,v)=>s+v,0)/20).toFixed(2)) });
+    }
+
+    candleSeries.setData(tvCandleData);
+    volSeries.setData(tvVolData);
+    ma10S.setData(tvMa10);
+    ma20S.setData(tvMa20);
+    tvChart.timeScale().fitContent();
+    currentCharts['tv-price'] = tvChart;
+    currentCharts['tv-price-data'] = tvCandleData;
   }, 50);
 
-  // Volume + Analyst grid
+  // Analyst + Sentiment grid
   const chartGrid = document.createElement('div');
   chartGrid.className = 'chart-grid fade-in';
   chartGrid.innerHTML = `
-    <div class="chart-wrap"><div class="chart-title">${charts.volumeChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-volume"></canvas></div></div>
     <div class="chart-wrap"><div class="chart-title">${charts.analystChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-analyst"></canvas></div></div>
+    <div class="chart-wrap"><div class="chart-title">${charts.sentimentChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-sentiment"></canvas></div></div>
   `;
   panel.appendChild(chartGrid);
   setTimeout(() => {
-    const ctxV = document.getElementById('chart-volume').getContext('2d');
-    currentCharts['volume'] = new Chart(ctxV, { type: 'bar', data: charts.volumeChart.data, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins } } });
     const ctxA = document.getElementById('chart-analyst').getContext('2d');
     currentCharts['analyst'] = new Chart(ctxA, { type: 'doughnut', data: charts.analystChart.data, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#7a8fb8', font: { size: 10, family: "'DM Mono', monospace" }, boxWidth: 10, padding: 6 } } }, cutout: '65%' } });
-  }, 50);
-
-  // Sentiment + RSI row
-  const bottomGrid = document.createElement('div');
-  bottomGrid.className = 'chart-grid fade-in';
-  const rsiColor = marketData.rsi > 70 ? 'var(--red)' : marketData.rsi < 30 ? 'var(--cyan)' : 'var(--green)';
-  const rsiLabel = marketData.rsi > 70 ? 'OVERBOUGHT' : marketData.rsi < 30 ? 'OVERSOLD' : 'NEUTRAL';
-  bottomGrid.innerHTML = `
-    <div class="chart-wrap"><div class="chart-title">${charts.sentimentChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-sentiment"></canvas></div></div>
-    <div class="chart-wrap" style="display:flex;flex-direction:column;justify-content:center">
-      <div class="chart-title">RSI Indicator</div>
-      <div class="rsi-gauge">
-        <div class="rsi-number" style="color:${rsiColor}">${marketData.rsi}</div>
-        <div class="rsi-label" style="background:rgba(0,0,0,0.2);color:${rsiColor}">${rsiLabel}</div>
-        <div class="rsi-bar-track" style="width:100%">
-          <div class="rsi-marker" style="left:${marketData.rsi}%"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;width:100%;font-size:10px;color:var(--text3);font-family:var(--mono)"><span>0</span><span>30</span><span>70</span><span>100</span></div>
-      </div>
-    </div>
-  `;
-  panel.appendChild(bottomGrid);
-  setTimeout(() => {
     const ctxS = document.getElementById('chart-sentiment').getContext('2d');
     currentCharts['sentiment'] = new Chart(ctxS, { type: 'bar', data: charts.sentimentChart.data, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins }, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: -1, max: 1 } } } });
   }, 50);
+
+  // RSI gauge (standalone)
+  const rsiCard = document.createElement('div');
+  rsiCard.className = 'chart-wrap fade-in';
+  const rsiColor = marketData.rsi > 70 ? 'var(--red)' : marketData.rsi < 30 ? 'var(--cyan)' : 'var(--green)';
+  const rsiLabel = marketData.rsi > 70 ? 'OVERBOUGHT' : marketData.rsi < 30 ? 'OVERSOLD' : 'NEUTRAL';
+  rsiCard.style.cssText = 'display:flex;flex-direction:column;justify-content:center';
+  rsiCard.innerHTML = `
+    <div class="chart-title">RSI Indicator</div>
+    <div class="rsi-gauge">
+      <div class="rsi-number" style="color:${rsiColor}">${marketData.rsi}</div>
+      <div class="rsi-label" style="background:rgba(0,0,0,0.2);color:${rsiColor}">${rsiLabel}</div>
+      <div class="rsi-bar-track" style="width:100%">
+        <div class="rsi-marker" style="left:${marketData.rsi}%"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;width:100%;font-size:10px;color:var(--text3);font-family:var(--mono)"><span>0</span><span>30</span><span>70</span><span>100</span></div>
+    </div>
+  `;
+  panel.appendChild(rsiCard);
 
   // EDA insights
   const insightCard = document.createElement('div');
@@ -743,10 +847,13 @@ function renderRecommendation(rec, panel) {
       <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">Signal Breakdown</div>
       <div class="signal-grid">
         ${(rec.signals || []).map(s => `
-          <div class="signal-row">
-            <span class="signal-pts ${s.points > 0 ? 'pos' : 'neg'}">${s.points > 0 ? '+' : ''}${s.points}</span>
-            <span class="signal-name">${s.name}</span>
-            <span class="signal-reason">${s.reason}</span>
+          <div>
+            <div class="signal-row">
+              <span class="signal-pts ${s.points > 0 ? 'pos' : 'neg'}">${s.points > 0 ? '+' : ''}${s.points}</span>
+              <span class="signal-name">${s.name}</span>
+              <span class="signal-reason">${s.reason}</span>
+            </div>
+            ${s.detail && s.detail.length ? `<div class="signal-detail">${s.detail.map(d => `<span class="detail-chip"><span>${d.label}:</span>${d.value}</span>`).join('')}</div>` : ''}
           </div>
         `).join('')}
       </div>
@@ -762,11 +869,82 @@ function renderRecommendation(rec, panel) {
     <div class="disclaimer">${rec.disclaimer}</div>
   `;
   panel.appendChild(recCard);
+
+  // Historical Patterns card
+  const hp = rec.historicalPatterns;
+  if (hp && hp.instances && hp.instances.length > 0) {
+    const s = hp.summary;
+    const avg5Color = s.avg5d >= 0 ? 'var(--green)' : 'var(--red)';
+    const avg10Color = s.avg10d >= 0 ? 'var(--green)' : 'var(--red)';
+    const patternCard = document.createElement('div');
+    patternCard.className = 'card fade-in';
+    patternCard.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Historical Pattern Analogs</span>
+        <span style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.15)">${hp.pattern}</span>
+      </div>
+      <p style="font-size:12px;color:var(--text3);margin-bottom:12px">
+        Found <strong style="color:var(--text)">${s.count}</strong> past instances matching current RSI zone + MA50 position over the last <strong style="color:var(--text)">${hp.lookbackDays}</strong> trading days.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">
+        <div class="pattern-stat">
+          <span class="pattern-stat-label">Avg 5d Return</span>
+          <span class="pattern-stat-value" style="color:${avg5Color}">${s.avg5d >= 0 ? '+' : ''}${s.avg5d}%</span>
+        </div>
+        <div class="pattern-stat">
+          <span class="pattern-stat-label">5d Win Rate</span>
+          <span class="pattern-stat-value" style="color:var(--cyan)">${s.winRate5d}</span>
+        </div>
+        <div class="pattern-stat">
+          <span class="pattern-stat-label">Avg 10d Return</span>
+          <span class="pattern-stat-value" style="color:${avg10Color}">${s.avg10d >= 0 ? '+' : ''}${s.avg10d}%</span>
+        </div>
+        <div class="pattern-stat">
+          <span class="pattern-stat-label">10d Win Rate</span>
+          <span class="pattern-stat-value" style="color:var(--cyan)">${s.winRate10d}</span>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Recent Matches (most recent ${hp.instances.length})</div>
+      <div class="analog-row" style="font-size:10px;color:var(--text3);border-bottom:1px solid var(--border);padding-bottom:4px;margin-bottom:2px">
+        <span>Date</span><span>Entry</span><span class="analog-ret">+5d Return</span><span class="analog-ret">+10d Return</span>
+      </div>
+      ${hp.instances.map(inst => `
+        <div class="analog-row">
+          <span class="analog-date">${inst.date}</span>
+          <span style="color:var(--text2)">$${inst.entryPrice}</span>
+          <span class="analog-ret ${inst.return5d >= 0 ? 'pos' : 'neg'}">${inst.return5d >= 0 ? '+' : ''}${inst.return5d}%</span>
+          <span class="analog-ret ${inst.return10d >= 0 ? 'pos' : 'neg'}">${inst.return10d >= 0 ? '+' : ''}${inst.return10d}%</span>
+        </div>
+      `).join('')}
+      <p style="font-size:10px;color:var(--text3);margin-top:10px">⚠ Past patterns are not predictive. Sample size may be small — treat as context, not signal.</p>
+    `;
+    panel.appendChild(patternCard);
+  }
+
   panel.scrollTop = 0;
 }
 
+function setTVRange(days, btn) {
+  const tvChart = currentCharts['tv-price'];
+  const tvData = currentCharts['tv-price-data'];
+  if (!tvChart || !tvData || tvData.length === 0) return;
+  document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (days === 0) { tvChart.timeScale().fitContent(); return; }
+  const toStr = tvData[tvData.length - 1].time;
+  const fromDate = new Date(toStr);
+  fromDate.setDate(fromDate.getDate() - days);
+  const fromStr = fromDate.toISOString().split('T')[0];
+  const firstStr = tvData[0].time;
+  tvChart.timeScale().setVisibleRange({ from: fromStr < firstStr ? firstStr : fromStr, to: toStr });
+}
+
 function destroyCharts() {
-  Object.values(currentCharts).forEach(c => { try { c.destroy(); } catch(e) {} });
+  Object.entries(currentCharts).forEach(([key, c]) => {
+    if (!c) return;
+    if (key === 'tv-price') { try { c.remove(); } catch(e) {} }
+    else if (key !== 'tv-price-data') { try { c.destroy(); } catch(e) {} }
+  });
   currentCharts = {};
 }
 

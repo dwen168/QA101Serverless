@@ -14,8 +14,9 @@ function normalizeTicker(ticker) {
 
   const cleanTicker = ticker.toUpperCase().trim();
 
-  if (!/^[A-Z]{1,5}$/.test(cleanTicker)) {
-    throw new Error('ticker must be 1-5 uppercase letters');
+  // Allow international tickers: US (1-5 letters), or exchange-suffixed (e.g. CBA.AX, 7203.T, HSBA.L)
+  if (!/^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(cleanTicker)) {
+    throw new Error('Invalid ticker format');
   }
 
   return cleanTicker;

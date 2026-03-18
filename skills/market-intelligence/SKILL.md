@@ -45,6 +45,8 @@ Collect the following price metrics (live or from mock generator):
 
 ### Step 3 — Compute Technical Indicators
 Using the 30-day price history:
+
+**Basic Indicators:**
 - **MA20** — 20-day simple moving average of closing prices
 - **MA50** — 50-day SMA (use available history; extrapolate if fewer than 50 days)
 - **MA200** — 200-day SMA (estimate from available data)
@@ -53,6 +55,13 @@ Using the 30-day price history:
   - Average gain / average loss over last 14 days
   - RSI = 100 − (100 / (1 + RS)) where RS = avgGain / avgLoss
 - **Trend classification**: BULLISH if price > MA50 and price > MA20; BEARISH if price < MA50; otherwise NEUTRAL
+
+**Advanced Indicators (calculated locally):**
+- **MACD** — 12-EMA − 26-EMA with 9-EMA signal line; detect momentum crossovers
+- **Bollinger Bands** — 20-SMA ± 2σ; identify overbought/oversold levels
+- **KDJ (Stochastic)** — %K, %D, %J values; reversal and divergence detection
+- **OBV (On-Balance Volume)** — Cumulative volume with price direction; confirm trends
+- **VWAP (Volume Weighted Average Price)** — Fair value price; support/resistance levels
 
 ### Step 4 — Retrieve News & Sentiment
 - Collect 5 recent headlines relevant to the ticker.
@@ -101,6 +110,51 @@ Using all data collected above, produce a JSON `llmAnalysis` object with:
     "analystConsensus": { "strongBuy": 8, "buy": 12, "hold": 6, "sell": 2, "strongSell": 1, "targetHigh": 240, "targetLow": 165, "targetMean": 205, "upside": 10.5 },
     "news": [{ "title": "...", "source": "Reuters", "sentiment": 0.7, "hoursAgo": 2 }],
     "priceHistory": [{ "date": "2026-02-14", "close": 180.0, "volume": 55000000, "open": 179.0, "high": 181.0, "low": 178.5 }],
+    "technicalIndicators": {
+      "available": true,
+      "macd": {
+        "macdLine": 1.23,
+        "signalLine": 0.95,
+        "histogram": 0.28,
+        "signal": "BULLISH"
+      },
+      "bollingerBands": {
+        "upperBand": 195.6,
+        "middleBand": 182.1,
+        "lowerBand": 168.6,
+        "bbPosition": 0.72,
+        "signal": "NEUTRAL",
+        "stdDev": 6.75
+      },
+      "kdj": {
+        "k": 68.5,
+        "d": 62.3,
+        "j": 80.9,
+        "rsv": 68.5,
+        "signal": "OVERBOUGHT"
+      },
+      "obv": {
+        "obv": 4820000000,
+        "obvMA14": 4750000000,
+        "obvTrend": "BULLISH",
+        "signal": "BULLISH"
+      },
+      "vwap": {
+        "vwap": 183.25,
+        "currentPrice": 185.50,
+        "priceDiff": 2.25,
+        "priceDiffPercent": 1.22,
+        "signal": "ABOVE_VWAP"
+      },
+      "atr14": 2.10,
+      "var95": {
+        "varPercent": -3.45,
+        "varPrice": 6.39,
+        "confidence": 95,
+        "interpretation": "At 95% confidence, max 1-day loss is 3.45%"
+      },
+      "calculatedAt": "2026-03-17T12:00:00.000Z"
+    },
     "collectedAt": "2026-03-17T12:00:00.000Z"
   },
   "llmAnalysis": {

@@ -1,0 +1,127 @@
+{
+  "timestamp": "2026-03-18T00:00:00.000Z",
+  "version": "1.0-hardcoded",
+  "note": "Run: npm run calibrate-weights -- --symbols AAPL,MSFT,GOOGL to update from historical data",
+  "model_metrics": {
+    "accuracy": 0.0,
+    "f1_score": 0.0,
+    "auc": 0.0,
+    "status": "No calibration yet - using experience-based defaults"
+  },
+  "signal_weights": {
+    "trend_ma50_bullish": {
+      "points": 2,
+      "description": "Price > MA50 (bullish trend)"
+    },
+    "trend_ma50_bearish": {
+      "points": -2,
+      "description": "Price < MA50 (bearish trend)"
+    },
+    "trend_ma200_bullish": {
+      "points": 1,
+      "description": "Price > MA200 (long-term uptrend)"
+    },
+    "trend_ma200_bearish": {
+      "points": -1,
+      "description": "Price < MA200 (long-term downtrend)"
+    },
+    "rsi_oversold": {
+      "points": 1,
+      "description": "RSI < 30 (contrarian buy signal)"
+    },
+    "rsi_healthy": {
+      "points": 1,
+      "description": "RSI 45-65 (healthy bullish zone)"
+    },
+    "rsi_overbought": {
+      "points": -2,
+      "description": "RSI > 70 (overextended, pullback risk)"
+    },
+    "sentiment_bullish": {
+      "points": 2,
+      "description": "Positive sentiment > 0.3"
+    },
+    "sentiment_bearish": {
+      "points": -2,
+      "description": "Negative sentiment < -0.3"
+    },
+    "analyst_strong_buy": {
+      "points": 2,
+      "description": "Buy consensus > 60%"
+    },
+    "analyst_weak_support": {
+      "points": -1,
+      "description": "Buy consensus < 30%"
+    },
+    "analyst_upside": {
+      "points": 1,
+      "description": "Price target upside > 10%"
+    },
+    "analyst_downside": {
+      "points": -1,
+      "description": "Price target downside < -5%"
+    },
+    "momentum_strong_up": {
+      "points": 1,
+      "description": "Daily change > +1.5%"
+    },
+    "momentum_strong_down": {
+      "points": -1,
+      "description": "Daily change < -2.0%"
+    },
+    "macd_bullish": {
+      "points": 1,
+      "description": "MACD > signal line (momentum positive)"
+    },
+    "macd_bearish": {
+      "points": -1,
+      "description": "MACD < signal line (momentum negative)"
+    },
+    "bb_oversold": {
+      "points": 1,
+      "description": "Price at lower Bollinger Band (bounce opportunity)"
+    },
+    "bb_overbought": {
+      "points": -1,
+      "description": "Price at upper Bollinger Band (pullback risk)"
+    },
+    "kdj_oversold": {
+      "points": 1,
+      "description": "KDJ < 20 (contrarian buy signal)"
+    },
+    "kdj_overbought": {
+      "points": -1,
+      "description": "KDJ > 80 (potential pullback)"
+    },
+    "obv_bullish": {
+      "points": 1,
+      "description": "OBV rising (volume confirms uptrend)"
+    },
+    "obv_bearish": {
+      "points": -1,
+      "description": "OBV falling (volume confirms downtrend)"
+    },
+    "vwap_above": {
+      "points": 1,
+      "description": "Price > VWAP (bullish positioning)"
+    },
+    "vwap_below": {
+      "points": -1,
+      "description": "Price < VWAP (bearish positioning)"
+    }
+  },
+  "calibration_notes": {
+    "data_sources": ["Alpha Vantage (price)", "Finnhub (news, analyst, fundamentals)"],
+    "target_variable": "5-day forward return > 2% (binary classification)",
+    "model_type": "XGBoost classifier with StandardScaler",
+    "feature_count": 12,
+    "historical_symbols": [],
+    "next_steps": [
+      "Collect 2+ years of historical data for 10-20 symbols",
+      "Run: python backend/scripts/signal-calibration.py --symbols AAPL,MSFT,GOOGL,NVDA,... --days 500",
+      "Review metrics (Accuracy, F1, AUC) and update weights",
+      "A/B test new weights against hardcoded baseline",
+      "Consider market regime (bull/bear/sideways) for weight adjustments"
+    ]
+  }
+}

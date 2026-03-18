@@ -8,6 +8,8 @@ const { routeChatMessage } = require('./lib/chat');
 const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
 const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
 const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
+const { runPortfolioOptimization } = require('../skills/portfolio-optimization/scripts');
+const { runBacktest } = require('../skills/backtesting/scripts');
 
 const app = express();
 const skills = loadSkills();
@@ -44,6 +46,35 @@ app.post('/api/skills/trade-recommendation', async (req, res) => {
     const result = await runTradeRecommendation({
       marketData: req.body.marketData,
       edaInsights: req.body.edaInsights,
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(res, error);
+  }
+});
+
+app.post('/api/skills/portfolio-optimization', async (req, res) => {
+  try {
+    const result = await runPortfolioOptimization({
+      tickers: req.body.tickers,
+      useMarketData: req.body.useMarketData,
+      timeHorizon: req.body.timeHorizon || 'MEDIUM',
+    });
+    res.json(result);
+  } catch (error) {
+    handleRouteError(res, error);
+  }
+});
+
+app.post('/api/skills/backtesting', async (req, res) => {
+  try {
+    const result = await runBacktest({
+      ticker: req.body.ticker,
+      strategyName: req.body.strategyName || 'trade-recommendation',
+      startDate: req.body.startDate,
+      endDate: req.body.endDate,
+      initialCapital: req.body.initialCapital || 100000,
+      apiKey: config.alphaVantageApiKey,
     });
     res.json(result);
   } catch (error) {
