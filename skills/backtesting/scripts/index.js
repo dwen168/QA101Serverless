@@ -17,15 +17,28 @@ const {
   calculateMACD,
   calculateBollingerBands,
 } = require('../../../backend/lib/technical-indicators');
+const path = require('path');
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
-// Fetch historical data from Alpha Vantage
-async function fetchHistoricalData(ticker, apiKey) {
+// Singleton Yahoo Finance instance (resolved from backend/node_modules)
+let _yf = null;
+function getYahooFinance() {
+  if (!_yf) {
+    const yf2Path = path.resolve(__dirname, '../../../backend/node_modules/yahoo-finance2');
+    const YF = require(yf2Path).default;
+    _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+  }
+  return _yf;
+}
+
+async function fetchHistoricalDataFromAlphaVantage(ticker, apiKey) {
   try {
+    if (!apiKey || apiKey === 'demo') return null;
+
     const url = 'https://www.alphavantage.co/query';
     const params = new URLSearchParams({
       function: 'TIME_SERIES_DAILY_ADJUSTED',
@@ -64,6 +77,55 @@ async function fetchHistoricalData(ticker, apiKey) {
     console.error('[Backtest] Fetch error:', error.message);
     return null;
   }
+}
+
+async function fetchHistoricalDataFromYahoo(ticker) {
+  try {
+    const yf = getYahooFinance();
+    const to = new Date();
+    const from = new Date(Date.now() - 3650 * 24 * 3600 * 1000);
+
+    const history = await yf.historical(ticker, {
+      period1: from.toISOString().split('T')[0],
+      period2: to.toISOString().split('T')[0],
+      interval: '1d',
+    });
+
+    if (!history || history.length < 5) return null;
+
+    return history
+      .filter((bar) => bar && bar.date && safeNumber(bar.close) > 0)
+      .map((bar) => ({
+        date: new Date(bar.date),
+        open: safeNumber(bar.open, safeNumber(bar.close)),
+        high: safeNumber(bar.high, safeNumber(bar.close)),
+        low: safeNumber(bar.low, safeNumber(bar.close)),
+        close: safeNumber(bar.close),
+        volume: Math.floor(safeNumber(bar.volume)),
+      }))
+      .sort((a, b) => a.date - b.date);
+  } catch (error) {
+    console.error('[Backtest] Yahoo fetch error:', error.message);
+    return null;
+  }
+}
+
+// Fetch historical data with fallback: Alpha Vantage -> Yahoo Finance
+async function fetchHistoricalData(ticker, apiKey) {
+  const alphaData = await fetchHistoricalDataFromAlphaVantage(ticker, apiKey);
+  if (alphaData && alphaData.length >= 50) {
+    return { data: alphaData, source: 'alpha-vantage' };
+  }
+
+  const yahooData = await fetchHistoricalDataFromYahoo(ticker);
+  if (yahooData && yahooData.length >= 50) {
+    return { data: yahooData, source: 'yahoo-finance' };
+  }
+
+  return {
+    data: alphaData || yahooData || null,
+    source: alphaData ? 'alpha-vantage' : yahooData ? 'yahoo-finance' : 'unavailable',
+  };
 }
 
 function getRequiredWarmupBars(signalType) {
@@ -411,15 +473,13 @@ async function runBacktest(params, dependencies = {}) {
     throw new Error(`Unsupported strategyName: ${strategyName}. Use trade-recommendation, macd-bb, or rsi-ma`);
   }
 
-  if (!apiKey) {
-    throw new Error('Alpha Vantage API key is required for backtesting');
-  }
-  
-  // Fetch historical data
-  const priceData = await fetchHistoricalData(ticker, apiKey);
+  // Fetch historical data (Alpha Vantage first, then Yahoo fallback)
+  const historical = await fetchHistoricalData(ticker, apiKey);
+  const priceData = historical.data;
   if (!priceData || priceData.length < 50) {
     return {
       error: 'Insufficient historical data. Need at least 50 trading days.',
+      dataSource: historical.source,
       skillUsed: 'backtesting',
     };
   }
@@ -538,7 +598,9 @@ async function runBacktest(params, dependencies = {}) {
           : null,
       },
       recommendations,
+      dataSource: historical.source,
     },
+    dataSource: historical.source,
     skillUsed: 'backtesting',
   };
 }

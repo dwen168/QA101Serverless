@@ -71,6 +71,12 @@ function getDefaultWeights() {
       macro_sentiment_bearish: { points: -0.5 },
       macro_sentiment_bullish: { points: 0.5 },
       macro_sector_headwind: { points: -0.5 },
+      eda_breakout_bullish: { points: 0.5 },
+      eda_breakout_bearish: { points: -0.5 },
+      eda_volume_confirmation: { points: 0.5 },
+      eda_volatility_risk: { points: -0.5 },
+      eda_trend_strength: { points: 0.5 },
+      eda_trend_weakness: { points: -0.5 },
     },
     model_metrics: {
       status: 'Hardcoded defaults (no calibration run yet)'

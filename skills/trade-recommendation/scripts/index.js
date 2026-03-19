@@ -76,7 +76,7 @@ function findHistoricalPatterns(priceHistory, marketData) {
   };
 }
 
-function scoreSignals(marketData) {
+function scoreSignals(marketData, edaInsights = {}) {
   const signals = [];
   let score = 0;
 
@@ -210,6 +210,44 @@ function scoreSignals(marketData) {
       add('Macro-Sector Headwind', macroWeight('macro_sector_headwind', -1), `Current macro themes directly pressure ${sector}.`, [
         { label: 'Sector', value: sector },
         { label: 'Themes', value: overlapThemes.join(', ') },
+      ]);
+    }
+  }
+
+  // EDA engineered factors (small overlay weights)
+  const edaFactors = edaInsights?.edaFactors || {};
+  if (edaFactors.available) {
+    if (edaFactors.breakoutSignal === 'BULLISH_BREAKOUT') {
+      add('EDA Breakout', w('eda_breakout_bullish') || 0.5, 'Price broke above recent 20-day range.', [
+        { label: 'Breakout20', value: `+${fmt(edaFactors.breakout20Pct, 2)}%` },
+        { label: 'Volume', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
+      ]);
+    } else if (edaFactors.breakoutSignal === 'BEARISH_BREAKDOWN') {
+      add('EDA Breakdown', w('eda_breakout_bearish') || -0.5, 'Price lost recent 20-day support.', [
+        { label: 'Breakout20', value: `${fmt(edaFactors.breakout20Pct, 2)}%` },
+        { label: 'Volume', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
+      ]);
+    }
+
+    if (edaFactors.volumeRegime === 'HIGH' && (marketData.changePercent || 0) > 0) {
+      add('EDA Volume Confirmation', w('eda_volume_confirmation') || 0.5, 'Up move is supported by high volume participation.', [
+        { label: 'VolumeRatio', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
+      ]);
+    }
+
+    if (edaFactors.volatilityRegime === 'HIGH') {
+      add('EDA Volatility Risk', w('eda_volatility_risk') || -0.5, 'High realized volatility increases execution risk.', [
+        { label: 'Vol20', value: `${fmt(edaFactors.volatility20, 1)}%` },
+      ]);
+    }
+
+    if (edaFactors.trendStrengthSignal === 'STRONG_UP') {
+      add('EDA Trend Strength', w('eda_trend_strength') || 0.5, 'MA20 is meaningfully above MA50.', [
+        { label: 'TrendGap', value: `+${fmt(edaFactors.trendStrengthPct, 2)}%` },
+      ]);
+    } else if (edaFactors.trendStrengthSignal === 'STRONG_DOWN') {
+      add('EDA Trend Weakness', w('eda_trend_weakness') || -0.5, 'MA20 is meaningfully below MA50.', [
+        { label: 'TrendGap', value: `${fmt(edaFactors.trendStrengthPct, 2)}%` },
       ]);
     }
   }
@@ -393,7 +431,7 @@ function buildFallbackRecommendation(marketData, action, signals, confidence, bu
 async function runTradeRecommendation({ marketData, edaInsights }, dependencies = {}) {
   requireObject(marketData, 'marketData');
 
-  const { signals, score, buyRatio } = scoreSignals(marketData);
+  const { signals, score, buyRatio } = scoreSignals(marketData, edaInsights || {});
   const { action, actionColor } = mapAction(score);
   const baseConfidence = Math.min(95, Math.floor((Math.abs(score) / 12) * 100 + 40));
   const macroRisk = String(marketData?.macroContext?.riskLevel || '').toUpperCase();
@@ -460,6 +498,10 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
         riskLevel: marketData?.macroContext?.riskLevel || 'UNKNOWN',
         sentimentLabel: marketData?.macroContext?.sentimentLabel || 'UNKNOWN',
         dominantThemes: (marketData?.macroContext?.dominantThemes || []).slice(0, 3),
+      },
+      edaOverlay: {
+        available: !!edaInsights?.edaFactors?.available,
+        factors: edaInsights?.edaFactors || null,
       },
       ...llmRecommendation,
       historicalPatterns,

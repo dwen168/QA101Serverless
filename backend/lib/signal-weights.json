@@ -128,6 +128,30 @@
     "macro_sector_headwind": {
       "points": -0.5,
       "description": "Dominant macro themes create direct sector headwinds"
+    },
+    "eda_breakout_bullish": {
+      "points": 0.5,
+      "description": "EDA breakout above recent 20-day range"
+    },
+    "eda_breakout_bearish": {
+      "points": -0.5,
+      "description": "EDA breakdown below recent 20-day range"
+    },
+    "eda_volume_confirmation": {
+      "points": 0.5,
+      "description": "EDA high-volume confirmation on positive move"
+    },
+    "eda_volatility_risk": {
+      "points": -0.5,
+      "description": "EDA high volatility regime risk penalty"
+    },
+    "eda_trend_strength": {
+      "points": 0.5,
+      "description": "EDA trend strength (MA20 significantly above MA50)"
+    },
+    "eda_trend_weakness": {
+      "points": -0.5,
+      "description": "EDA trend weakness (MA20 significantly below MA50)"
     }
   },
   "calibration_notes": {
