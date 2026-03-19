@@ -170,13 +170,13 @@ function scoreSignals(marketData, edaInsights = {}) {
     const macroSent = Number(macro.sentimentScore || 0);
 
     if (macroRisk === 'HIGH') {
-      add('Macro Risk-Off', macroWeight('macro_risk_high', -2), 'Global macro backdrop is risk-off; tighten conviction.', [
+      add('Macro Risk-Off', macroWeight('macro_risk_bearish', -2), 'Global macro backdrop is risk-off; tighten conviction.', [
         { label: 'Risk', value: macroRisk },
         { label: 'Tone', value: macro.sentimentLabel || 'RISK_OFF' },
         { label: 'Score', value: fmt(macroSent, 2) },
       ]);
     } else if (macroRisk === 'LOW') {
-      add('Macro Tailwind', macroWeight('macro_risk_low', 1), 'Macro backdrop is supportive for risk assets.', [
+      add('Macro Tailwind', macroWeight('macro_risk_bullish', 1), 'Macro backdrop is supportive for risk assets.', [
         { label: 'Risk', value: macroRisk },
         { label: 'Tone', value: macro.sentimentLabel || 'RISK_ON' },
         { label: 'Score', value: fmt(macroSent, 2) },
@@ -230,13 +230,13 @@ function scoreSignals(marketData, edaInsights = {}) {
     }
 
     if (edaFactors.volumeRegime === 'HIGH' && (marketData.changePercent || 0) > 0) {
-      add('EDA Volume Confirmation', w('eda_volume_confirmation') || 0.5, 'Up move is supported by high volume participation.', [
+      add('EDA Volume Confirmation', w('eda_volume_bullish') || 0.5, 'Up move is supported by high volume participation.', [
         { label: 'VolumeRatio', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
       ]);
     }
 
     if (edaFactors.volatilityRegime === 'HIGH') {
-      add('EDA Volatility Risk', w('eda_volatility_risk') || -0.5, 'High realized volatility increases execution risk.', [
+      add('EDA Volatility Risk', w('eda_volatility_bearish') || -0.5, 'High realized volatility increases execution risk.', [
         { label: 'Vol20', value: `${fmt(edaFactors.volatility20, 1)}%` },
       ]);
     }
@@ -258,12 +258,12 @@ function scoreSignals(marketData, edaInsights = {}) {
   const buyRatio = totalRatings === 0 ? 0 : (consensus.strongBuy + consensus.buy) / totalRatings;
 
   if (buyRatio > 0.6) {
-    add('Strong Analyst Buy', w('analyst_strong_buy'), `Majority of analysts rate Buy or Strong Buy`, [
+    add('Strong Analyst Buy', w('analyst_buy_strong'), `Majority of analysts rate Buy or Strong Buy`, [
       { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
       { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
     ]);
   } else if (buyRatio < 0.3) {
-    add('Weak Analyst Support', w('analyst_weak_support'), `Few analysts rate Buy`, [
+    add('Weak Analyst Support', w('analyst_buy_weak'), `Few analysts rate Buy`, [
       { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
       { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
     ]);

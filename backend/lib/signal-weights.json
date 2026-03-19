@@ -45,11 +45,11 @@
       "points": -2,
       "description": "Negative sentiment < -0.3"
     },
-    "analyst_strong_buy": {
+    "analyst_buy_strong": {
       "points": 2,
       "description": "Buy consensus > 60%"
     },
-    "analyst_weak_support": {
+    "analyst_buy_weak": {
       "points": -1,
       "description": "Buy consensus < 30%"
     },
@@ -109,11 +109,11 @@
       "points": -1,
       "description": "Price < VWAP (bearish positioning)"
     },
-    "macro_risk_high": {
+    "macro_risk_bearish": {
       "points": -1,
       "description": "Macro regime is high-risk / risk-off"
     },
-    "macro_risk_low": {
+    "macro_risk_bullish": {
       "points": 0.5,
       "description": "Macro regime is low-risk / risk-on"
     },
@@ -137,11 +137,11 @@
       "points": -0.5,
       "description": "EDA breakdown below recent 20-day range"
     },
-    "eda_volume_confirmation": {
+    "eda_volume_bullish": {
       "points": 0.5,
       "description": "EDA high-volume confirmation on positive move"
     },
-    "eda_volatility_risk": {
+    "eda_volatility_bearish": {
       "points": -0.5,
       "description": "EDA high volatility regime risk penalty"
     },
