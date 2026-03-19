@@ -160,12 +160,22 @@
   .news-item { padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
   .news-item:last-child { border-bottom: none; }
   .news-title { font-size: 12.5px; line-height: 1.45; color: var(--text); flex: 1; }
+  .news-title a { color: inherit; text-decoration: none; }
+  .news-title a:hover { color: var(--cyan); }
+  .news-summary { font-size: 11.5px; line-height: 1.5; color: var(--text2); margin-top: 5px; max-width: 720px; }
+  .news-details { margin-top: 5px; }
+  .news-toggle { font-size: 10px; font-family: var(--mono); color: var(--cyan); cursor: pointer; user-select: none; list-style: none; }
+  .news-toggle::-webkit-details-marker { display: none; }
+  .news-toggle:hover { text-decoration: underline; }
   .news-meta { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
   .news-source { font-size: 10px; font-family: var(--mono); color: var(--text3); }
   .news-time { font-size: 10px; color: var(--text3); }
+  .news-link { font-size: 10px; font-family: var(--mono); color: var(--cyan); text-decoration: none; }
+  .news-link:hover { text-decoration: underline; }
   .news-sentiment { flex-shrink: 0; font-size: 11px; font-family: var(--mono); padding: 2px 6px; border-radius: 4px; }
   .news-sentiment.pos { background: var(--green-dim); color: var(--green); }
   .news-sentiment.neg { background: var(--red-dim); color: var(--red); }
+  .news-sentiment.neutral { background: var(--amber-dim); color: var(--amber); }
 
   /* ── Chart containers ── */
   .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -396,6 +406,16 @@ async function processMessage(text) {
       addMessage('bot', data.message || `Running analysis on <strong>${data.ticker}</strong>...`);
       chatHistory.push({ role: 'assistant', content: data.message });
       await runSkillPipeline(data.ticker);
+    } else if (data.action === 'OPTIMIZE_PORTFOLIO') {
+      const tickers = Array.isArray(data.tickers) ? data.tickers : [];
+      if (tickers.length >= 2) {
+        addMessage('bot', data.message || `Running portfolio optimization on <strong>${tickers.join(', ')}</strong>...`);
+        chatHistory.push({ role: 'assistant', content: data.message || 'Running portfolio optimization...' });
+        await runPortfolioPipeline(tickers, data.timeHorizon || 'MEDIUM');
+      } else {
+        addMessage('bot', data.message || 'Please provide at least 2 tickers, e.g. "Optimize portfolio AAPL, MSFT, NVDA".');
+        chatHistory.push({ role: 'assistant', content: data.message || 'Please provide at least 2 tickers.' });
+      }
     } else {
       addMessage('bot', data.message || 'How can I help?');
       chatHistory.push({ role: 'assistant', content: data.message });
@@ -489,6 +509,113 @@ async function runSkillPipeline(ticker) {
     removeLoadingMsg();
     addMessage('bot', `Recommendation engine failed.`);
   }
+}
+
+async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
+  const panel = document.getElementById('analysis-panel');
+  panel.innerHTML = '';
+  destroyCharts();
+  resetPills();
+
+  const loading = addLoadingMsg('⟳ Running portfolio-optimization skill...');
+  try {
+    const r = await fetch(`${API_BASE}/skills/portfolio-optimization`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickers, timeHorizon }),
+    });
+    const d = await r.json();
+    removeLoadingMsg();
+
+    if (!r.ok || d.error) {
+      addMessage('bot', d.error || 'Portfolio optimization failed.');
+      return;
+    }
+
+    addMessage(
+      'bot',
+      `✓ Portfolio optimization complete for <strong>${tickers.join(', ')}</strong>`,
+      { cls: 's2', label: 'portfolio-optimization' }
+    );
+    renderPortfolioOptimization(d, panel);
+  } catch (err) {
+    removeLoadingMsg();
+    addMessage('bot', 'Could not run portfolio optimization. Make sure backend is running on port 3001.');
+  }
+}
+
+function renderPortfolioOptimization(result, panel) {
+  const metrics = result.portfolioMetrics || {};
+  const ranked = result.rankedTickers || [];
+  const sectors = result.sectorAnalysis || [];
+  const div = result.diversificationMetrics || {};
+  const narrative = result.llmNarrative || {};
+
+  const section = document.createElement('div');
+  section.className = 'section-divider fade-in';
+  section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">portfolio-optimization</span><div class="section-divider-line"></div>`;
+  panel.appendChild(section);
+
+  const summary = document.createElement('div');
+  summary.className = 'card fade-in';
+  summary.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">Portfolio Summary</span>
+      <span style="font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)">${result.timeHorizon || 'MEDIUM'} term</span>
+    </div>
+    <div class="ticker-stats" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stat-item"><span class="stat-label">TOTAL ALLOCATION</span><span class="stat-value">${(metrics.totalAllocation ?? 0).toFixed(1)}%</span></div>
+      <div class="stat-item"><span class="stat-label">CASH BUFFER</span><span class="stat-value">${(metrics.cashBuffer ?? 0).toFixed(1)}%</span></div>
+      <div class="stat-item"><span class="stat-label">EXPECTED RETURN</span><span class="stat-value">${(metrics.expectedReturn ?? 0).toFixed(1)}%</span></div>
+      <div class="stat-item"><span class="stat-label">AVG PAIRWISE CORR</span><span class="stat-value">${(div.avgPairwiseCorrelation ?? 0).toFixed(3)}</span></div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text2)"><strong>Diversification:</strong> ${div.riskAssessment || 'N/A'}</div>
+  `;
+  panel.appendChild(summary);
+
+  const ranking = document.createElement('div');
+  ranking.className = 'card fade-in';
+  ranking.innerHTML = `
+    <div class="card-header"><span class="card-title">Ranked Tickers</span></div>
+    <div style="display:grid;grid-template-columns:50px 90px 90px 80px 90px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+      <span>Rank</span><span>Ticker</span><span>Action</span><span>Score</span><span>Alloc</span>
+    </div>
+    ${(ranked || []).map(r => `
+      <div style="display:grid;grid-template-columns:50px 90px 90px 80px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
+        <span style="color:var(--text3)">#${r.rank}</span>
+        <span style="color:var(--cyan)">${r.ticker}</span>
+        <span style="color:${r.action && r.action.includes('BUY') ? 'var(--green)' : r.action === 'SELL' ? 'var(--red)' : 'var(--amber)'}">${r.action || 'HOLD'}</span>
+        <span>${(r.compositeScore ?? 0).toFixed(1)}</span>
+        <span>${(r.allocation ?? 0).toFixed(1)}%</span>
+      </div>
+    `).join('')}
+  `;
+  panel.appendChild(ranking);
+
+  if (sectors.length) {
+    const sectorCard = document.createElement('div');
+    sectorCard.className = 'card fade-in';
+    sectorCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Sector Analysis</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${sectors.map(s => `<span class="detail-chip">${s.sector}: ${s.sectorStrength} (${s.allocation}%)</span>`).join('')}
+      </div>
+    `;
+    panel.appendChild(sectorCard);
+  }
+
+  if (narrative.executiveSummary || (narrative.recommendations && narrative.recommendations.length)) {
+    const narrativeCard = document.createElement('div');
+    narrativeCard.className = 'card fade-in';
+    narrativeCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Portfolio Narrative</span></div>
+      ${narrative.executiveSummary ? `<p style="font-size:13px;line-height:1.6;color:var(--text2)">${narrative.executiveSummary}</p>` : ''}
+      ${narrative.recommendations && narrative.recommendations.length ? `<div style="margin-top:10px">${narrative.recommendations.map(r => `<div class="insight-item"><div class="insight-dot"></div><span>${r}</span></div>`).join('')}</div>` : ''}
+    `;
+    panel.appendChild(narrativeCard);
+  }
+
+  panel.scrollTop = 0;
 }
 
 // ─────────────────────────────────────────
@@ -650,10 +777,16 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     ${d.news.map(n => `
       <div class="news-item">
         <div>
-          <div class="news-title">${n.title}</div>
-          <div class="news-meta"><span class="news-source">${n.source}</span><span class="news-time">${n.hoursAgo}h ago</span></div>
+          <div class="news-title">${n.url ? `<a href="${n.url}" target="_blank" rel="noopener noreferrer">${n.title}</a>` : n.title}</div>
+          ${n.summary ? `
+            <details class="news-details">
+              <summary class="news-toggle">Show summary</summary>
+              <div class="news-summary">${n.summary}</div>
+            </details>
+          ` : ''}
+          <div class="news-meta"><span class="news-source">${n.source}</span><span class="news-time">${n.hoursAgo}h ago</span>${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener noreferrer">Read article</a>` : ''}</div>
         </div>
-        <span class="news-sentiment ${n.sentiment > 0 ? 'pos' : 'neg'}">${n.sentiment > 0 ? '+' : ''}${n.sentiment.toFixed(2)}</span>
+        <span class="news-sentiment ${n.sentiment > 0.1 ? 'pos' : n.sentiment < -0.1 ? 'neg' : 'neutral'}">${n.sentiment > 0 ? '+' : ''}${n.sentiment.toFixed(2)}</span>
       </div>
     `).join('')}
   `;

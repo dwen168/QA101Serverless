@@ -50,6 +50,8 @@ async function fetchFinnhubNews(ticker) {
 
     return articles.map((article, i) => ({
       title: article.headline || '',
+      summary: article.summary || '',
+      url: article.url || '',
       source: article.source || 'Finnhub',
       sentiment: scores[i] ?? 0,
       hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
@@ -261,13 +263,25 @@ async function fetchYahooFinanceData(ticker) {
       const scores = await scoreSentimentsWithLLM(headlines);
       return items.map((n, i) => ({
         title: n.title || '',
+        summary: n.summary || n.description || '',
+        url: n.link || '',
         source: n.publisher || 'Yahoo Finance',
         sentiment: scores[i] ?? 0,
         hoursAgo: (() => {
           const ts = n.providerPublishTime;
           if (!ts) return 0;
-          // Yahoo Finance returns providerPublishTime in seconds (Unix epoch)
-          const publishMs = ts > 1e12 ? ts : ts * 1000;
+          let publishMs = 0;
+          if (typeof ts === 'number') {
+            publishMs = ts > 1e12 ? ts : ts * 1000;
+          } else if (typeof ts === 'string') {
+            if (/^\d+$/.test(ts)) {
+              const numericTs = Number(ts);
+              publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
+            } else {
+              publishMs = Date.parse(ts);
+            }
+          }
+          if (!Number.isFinite(publishMs) || publishMs <= 0) return 0;
           return Math.max(0, Math.round((Date.now() - publishMs) / 3600000));
         })(),
       }));

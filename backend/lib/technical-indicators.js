@@ -22,6 +22,23 @@ function calculateEMA(data, period) {
   return ema;
 }
 
+// Calculate full EMA series (null for unavailable early points)
+function calculateEMASeries(data, period) {
+  if (!Array.isArray(data) || data.length < period) return [];
+
+  const series = new Array(data.length).fill(null);
+  const k = 2 / (period + 1);
+  let ema = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  series[period - 1] = ema;
+
+  for (let i = period; i < data.length; i++) {
+    ema = (data[i] - ema) * k + ema;
+    series[i] = ema;
+  }
+
+  return series;
+}
+
 // Calculate Simple Moving Average (SMA)
 function calculateSMA(data, period) {
   if (data.length < period) return null;
@@ -41,18 +58,29 @@ function calculateStdDev(data, period) {
 
 // MACD (Moving Average Convergence Divergence)
 function calculateMACD(closes) {
-  if (closes.length < 26) return null;
-  
-  const ema12 = calculateEMA(closes, 12);
-  const ema26 = calculateEMA(closes, 26);
-  
-  if (!ema12 || !ema26) return null;
-  
-  const macdLine = ema12 - ema26;
-  
-  // For signal line, we need full MACD history
-  // Simplified: use last 9 values estimate
-  const signalLine = ema12 * 0.67; // Approximation
+  // Standard MACD(12,26,9): signal line is EMA9 of MACD line
+  if (!Array.isArray(closes) || closes.length < 34) return null;
+
+  const ema12Series = calculateEMASeries(closes, 12);
+  const ema26Series = calculateEMASeries(closes, 26);
+  if (ema12Series.length === 0 || ema26Series.length === 0) return null;
+
+  const macdSeries = [];
+  for (let i = 0; i < closes.length; i++) {
+    if (ema12Series[i] != null && ema26Series[i] != null) {
+      macdSeries.push(ema12Series[i] - ema26Series[i]);
+    }
+  }
+
+  if (macdSeries.length < 9) return null;
+
+  const signalSeries = calculateEMASeries(macdSeries, 9);
+  if (signalSeries.length === 0) return null;
+
+  const macdLine = macdSeries[macdSeries.length - 1];
+  const signalLine = signalSeries[signalSeries.length - 1];
+  if (macdLine == null || signalLine == null) return null;
+
   const histogram = macdLine - signalLine;
   
   return {
@@ -298,6 +326,7 @@ module.exports = {
   calculateVaR,
   calculateAllIndicators,
   calculateEMA,
+  calculateEMASeries,
   calculateSMA,
   calculateStdDev,
 };

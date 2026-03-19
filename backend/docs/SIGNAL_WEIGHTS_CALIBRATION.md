@@ -30,6 +30,14 @@ Original weights are based on intuition:
 
 ## Quick Start
 
+### Run Location (Important)
+You can run calibration from either location below:
+
+1. From repo root (`E:/WorkSource/QA101`)
+2. From backend folder (`E:/WorkSource/QA101/backend`)
+
+Use the matching `--output` path for each location to avoid accidental nested paths.
+
 ### 1. Install Python Dependencies
 ```bash
 pip install xgboost scikit-learn pandas numpy requests
@@ -55,6 +63,18 @@ npm run calibrate-weights -- --symbols AAPL,MSFT,GOOGL,NVDA,TSLA,AMD,NFLX --days
 
 # Output: lib/signal-weights.json
 ```
+
+Alternative (from repo root):
+```bash
+python backend/scripts/signal-calibration.py \
+  --symbols AAPL,MSFT,GOOGL,NVDA,TSLA \
+  --days 500 \
+  --output backend/lib/signal-weights.json
+```
+
+Path rule:
+- Running inside `backend`: use `--output lib/signal-weights.json`
+- Running from repo root: use `--output backend/lib/signal-weights.json`
 
 ### 4. Verify
 Check the generated `backend/lib/signal-weights.json`:
@@ -220,6 +240,42 @@ Required for data fetching. Get free tier: https://www.alphavantage.co (25 reque
 ---
 
 ## Advanced Usage
+
+### Multi-Stock Training at the Same Time (Pooled)
+The current script already supports pooled multi-stock training in one run.
+
+```bash
+python backend/scripts/signal-calibration.py \
+  --symbols AAPL,MSFT,NVDA,AMD,TSLA,GOOGL,AMZN,META \
+  --days 700 \
+  --output backend/lib/signal-weights.json
+```
+
+How pooled mode works:
+- Data from all symbols is combined into one dataset.
+- One model is trained on pooled samples.
+- One shared weight file is produced.
+
+When pooled mode is best:
+- You want one general weight set for many stocks.
+- You want more samples and better statistical stability.
+
+### Per-Stock Batch Training (Many Models)
+If you want one weight file per ticker, run batch jobs.
+
+```powershell
+$symbols = "AAPL","MSFT","NVDA","TSLA"
+foreach ($s in $symbols) {
+  python backend/scripts/signal-calibration.py \
+    --symbols $s \
+    --days 700 \
+    --output ("backend/lib/weights/" + $s + ".json")
+}
+```
+
+When per-stock mode is best:
+- You want ticker-specific weights.
+- You plan to load weights dynamically by ticker.
 
 ### Multi-Sector Calibration
 Calibrate separate weight sets by sector (Tech vs Finance vs Healthcare):

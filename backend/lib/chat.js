@@ -2,11 +2,12 @@ const axios = require('axios');
 const config = require('./config');
 
 async function routeChatMessage({ message, history = [] }) {
-  const systemPrompt = `You are QuantBot, an AI-powered quantitative analysis assistant. You help users analyze stocks using three specialized Agent Skills:
+  const systemPrompt = `You are QuantBot, an AI-powered quantitative analysis assistant. You help users analyze stocks using specialized Agent Skills:
 
 1. **market-intelligence** — Collects price trends, news, consensus, and sentiment
 2. **eda-visual-analysis** — Performs visual exploratory data analysis
 3. **trade-recommendation** — Generates BUY/HOLD/SELL recommendations
+4. **portfolio-optimization** — Optimizes allocation and ranking across multiple stocks
 
 When a user mentions a stock ticker or asks to analyze a stock, you MUST:
 1. Acknowledge you'll run the analysis
@@ -15,13 +16,16 @@ When a user mentions a stock ticker or asks to analyze a stock, you MUST:
 ALWAYS respond with a JSON object in this format:
 {
   "message": "Your conversational response here",
-  "action": null OR "ANALYZE_STOCK",
+  "action": null OR "ANALYZE_STOCK" OR "OPTIMIZE_PORTFOLIO",
   "ticker": null OR "TICKER_SYMBOL",
+  "tickers": null OR ["TICKER1", "TICKER2", "..."],
+  "timeHorizon": null OR "SHORT" OR "MEDIUM" OR "LONG",
   "skillSequence": null OR ["market-intelligence", "eda-visual-analysis", "trade-recommendation"]
 }
 
 For non-stock questions, set action to null and just respond conversationally.
 For stock analysis requests, extract the ticker and set action to "ANALYZE_STOCK".
+For portfolio optimization requests with multiple tickers, set action to "OPTIMIZE_PORTFOLIO" and provide tickers array.
 
 Common tickers: AAPL (Apple), TSLA (Tesla), NVDA (Nvidia), MSFT (Microsoft), AMZN (Amazon), GOOGL (Google), META (Meta).
 
@@ -57,9 +61,56 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
     const cleaned = String(content || '').replace(/```json|```/g, '').trim();
     return JSON.parse(cleaned);
   } catch {
+    const parseTimeHorizon = (raw) => {
+      const lower = String(raw || '').toLowerCase();
+      if (/short|swing|day trade|intraday|near term|near-term/.test(lower)) return 'SHORT';
+      if (/long|long term|long-term|invest|retirement/.test(lower)) return 'LONG';
+      return 'MEDIUM';
+    };
+
+    const extractTickers = (raw) => {
+      const upper = String(raw || '').toUpperCase();
+      const matches = upper.match(/\b([A-Z0-9]{1,6}(?:\.[A-Z]{1,3})?)\b/g) || [];
+      const banned = new Set([
+        'I', 'A', 'AN', 'THE', 'AND', 'OR', 'TO', 'FOR', 'OF', 'IN', 'ON', 'AT', 'WITH',
+        'BUY', 'SELL', 'HOLD', 'CHECK', 'LOOK', 'WHAT', 'ABOUT', 'SHOULD', 'IS', 'ARE',
+        'PORTFOLIO', 'OPTIMIZE', 'OPTIMISE', 'REBALANCE', 'ALLOCATE', 'ANALYZE', 'ANALYSE',
+        'SHORT', 'MEDIUM', 'LONG', 'TERM', 'MY', 'ME', 'PLEASE', 'NOW'
+      ]);
+      const unique = [];
+      for (const m of matches) {
+        if (!banned.has(m) && !unique.includes(m)) unique.push(m);
+      }
+      return unique;
+    };
+
     // Fallback: extract ticker from message
     // Matches: US tickers (AAPL, TSLA, CBA), international (CBA.AX, 7203.T, HSBA.L), NASDAQ/NYSE codes
     const msg = String(message || '').toUpperCase().trim();
+    const tickers = extractTickers(msg);
+
+    const portfolioIntent = /portfolio|optimi[sz]e|allocat|weight|rebalance|diversif|basket|multi.?stock/.test(msg.toLowerCase());
+    if (portfolioIntent) {
+      if (tickers.length >= 2) {
+        return {
+          message: `I will optimize a ${tickers.length}-stock portfolio (${tickers.join(', ')}) for ${parseTimeHorizon(msg).toLowerCase()} horizon.`,
+          action: 'OPTIMIZE_PORTFOLIO',
+          ticker: null,
+          tickers,
+          timeHorizon: parseTimeHorizon(msg),
+          skillSequence: ['portfolio-optimization'],
+        };
+      }
+
+      return {
+        message: 'I can optimize your portfolio. Please provide at least 2 tickers, e.g. "Optimize portfolio AAPL, MSFT, NVDA".',
+        action: null,
+        ticker: null,
+        tickers: null,
+        timeHorizon: null,
+        skillSequence: null,
+      };
+    }
     
     // Pattern: 1-6 alphanumeric chars, optionally followed by dot and 1-3 letter exchange code
     const tickerMatch = msg.match(/\b([A-Z0-9]{1,6}(?:\.[A-Z]{1,3})?)\b/);
@@ -74,14 +125,18 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
         message: `I'll analyze ${ticker} for you! Running all three skills now...`,
         action: 'ANALYZE_STOCK',
         ticker: ticker,
+        tickers: null,
+        timeHorizon: null,
         skillSequence: ['market-intelligence', 'eda-visual-analysis', 'trade-recommendation'],
       };
     }
 
     return {
-      message: 'I\'m QuantBot! Ask me to analyze any stock — try "Analyze AAPL", "CBA.AX", or "Should I buy NVDA?"',
+      message: 'I\'m QuantBot! Ask me to analyze a stock ("Analyze AAPL") or optimize a portfolio ("Optimize portfolio AAPL, MSFT, NVDA").',
       action: null,
       ticker: null,
+      tickers: null,
+      timeHorizon: null,
     };
   }
 }
