@@ -1431,11 +1431,8 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
         <div>
           <div class="news-title">${n.url ? `<a href="${n.url}" target="_blank" rel="noopener noreferrer">${n.title}</a>` : n.title}</div>
           ${n.summary ? `
-            <details class="news-details">
-              <summary class="news-toggle">Show summary</summary>
-              <div class="news-summary">${n.summary}</div>
-            </details>
-          ` : ''}
+            <div class="news-summary" style="margin-top:6px;font-size:12px;color:var(--text2);line-height:1.5">${n.summary}</div>
+          ` : `<div class="news-summary" style="margin-top:6px;font-size:12px;color:var(--text3);font-style:italic">(No summary available)</div>`}
           <div class="news-meta"><span class="news-source">${n.source}</span><span class="news-time">${n.hoursAgo}h ago</span>${n.url ? `<a class="news-link" href="${n.url}" target="_blank" rel="noopener noreferrer">Read article</a>` : ''}</div>
         </div>
         <span class="news-sentiment ${n.sentiment > 0.1 ? 'pos' : n.sentiment < -0.1 ? 'neg' : 'neutral'}">${n.sentiment > 0 ? '+' : ''}${n.sentiment.toFixed(2)}</span>

@@ -6,8 +6,8 @@ The market-intelligence skill uses **live data with timeout-aware fallback behav
 
 | Data Type | Primary Source | Fallback | Notes |
 |-----------|---|---|---|
-| **Price & Volume** | Alpha Vantage (`TIME_SERIES_DAILY`) | Yahoo Finance, then Mock | 25 req/day free; `REAL_DATA_TIMEOUT_MS` applies to live requests |
-| **News & Sentiment** | Finnhub (`/company-news`) | Yahoo Finance news, then Mock | 60 req/min free; local rule-based sentiment scoring |
+| **Price & Volume** | Finnhub (`/quote`) + Finnhub candles when available | Alpha Vantage history, then Mock | Current free-tier token returns 403 on Finnhub candle history, so Alpha Vantage supplements `priceHistory` for indicators |
+| **News & Sentiment** | Finnhub (`/company-news`) | Yahoo Finance news, then Mock | Company and macro headline sentiment now use LLM classification with rule-based fallback |
 | **Analyst Consensus** | Finnhub (`/stock/recommendation/`) | Mock | Average of strongBuy, buy, hold, sell, strongSell counts |
 | **Price Targets** | Finnhub (`/stock/price-target`) | Mock | High, low, mean from recent analyst estimates |
 | **Fundamentals** | Finnhub (`/stock/profile2`, `/stock/metric`) | Mock | P/E, EPS, market cap, sector, industry |
@@ -22,10 +22,10 @@ The market-intelligence skill uses **live data with timeout-aware fallback behav
 
 | Provider | Free Tier | npm Package | Notes |
 |----------|-----------|-------------|-------|
-| **Alpha Vantage** ✅ *in use* | 25 req/day | — (use `fetch`) | Env var: `ALPHA_VANTAGE_API_KEY` |
+| **Alpha Vantage** ✅ *fallback history* | 25 req/day | — (use `fetch`) | Env var: `ALPHA_VANTAGE_API_KEY`; used when Finnhub candle history is unavailable |
 | **Yahoo Finance 2** | Unlimited (unofficial) | `yahoo-finance2` | No API key needed |
 | **Polygon.io** | 5 req/min | — (use `axios`) | Requires registration |
-| **Finnhub** ✅ *in use* | 60 req/min | — (use `axios`) | News, analyst consensus, price targets, fundamentals |
+| **Finnhub** ✅ *primary* | 60 req/min | — (use `axios`) | Quote, news, analyst consensus, price targets, fundamentals; candle history access depends on plan |
 
 ### Alpha Vantage — Quick Integration
 ```js
@@ -74,13 +74,13 @@ const metricsRes = await axios.get(`https://finnhub.io/api/v1/stock/metric`, {
 ---
 
 ## Sentiment Scoring ✅ *currently implemented*
-Market-intelligence uses **local rule-based headline scoring**:
-- Scans headlines for positive and negative finance/macro keywords
-- No external API or LLM required; entirely local computation
+Market-intelligence now uses **LLM-first headline classification with deterministic fallback**:
+- Company headlines are classified by stock-direction impact using title-only prompts
+- Macro headlines are classified by broad market impact, theme, and risk tone using title-only prompts
+- If LLM classification fails, local keyword scoring remains available as fallback
 - Score bounds: [−1.0, +1.0]
-- Company news and macro news both use the same deterministic scoring path
 
-**Functions:** `scoreHeadlineSentimentFallback(headline)` and `scoreSentimentsWithRules(headlines)` in `skills/market-intelligence/scripts/index.js`
+**Functions:** `scoreCompanyNewsWithLlm(...)`, `scoreMacroNewsWithLlm(...)`, `scoreHeadlineSentimentFallback(headline)`, and `scoreSentimentsWithRules(headlines)` in `skills/market-intelligence/scripts/index.js`
 
 ---
 
@@ -118,5 +118,5 @@ const articles = newsRes.data.articles;
 ## Rate Limit Recommendations
 - Cache market data for ≥ 1 minute per ticker to avoid hitting free-tier limits.
 - Add an in-memory Map or Redis cache keyed on `${ticker}:${date}`.
-- Keep Alpha Vantage as a best-effort source; if it returns `Note` or `Information`, degrade to Yahoo Finance or mock data instead of failing the skill.
+- Keep Alpha Vantage as a best-effort history source; if it returns `Note` or `Information`, degrade to mock data instead of failing the skill.
 - Apply short enrichment timeouts to optional news/fundamental calls so price retrieval does not get blocked by secondary endpoints.

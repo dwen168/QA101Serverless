@@ -1,4 +1,5 @@
-const { normalizeTicker } = require('../../../backend/lib/utils');
+const { callDeepSeek } = require('../../../backend/lib/llm');
+const { normalizeTicker, parseJsonResponse } = require('../../../backend/lib/utils');
 const config = require('../../../backend/lib/config');
 const { calculateAllIndicators } = require('../../../backend/lib/technical-indicators');
 
@@ -8,6 +9,10 @@ const ENRICHMENT_TIMEOUT_MS = Math.min(5000, REAL_DATA_TIMEOUT_MS);
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function average(values) {
@@ -59,6 +64,11 @@ const MACRO_THEME_RULES = [
   },
 ];
 
+const MACRO_THEME_VALUES = new Set([
+  ...MACRO_THEME_RULES.map((rule) => rule.theme),
+  'GENERAL_MACRO',
+]);
+
 const SECTOR_THEME_HINTS = {
   Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
   Semiconductors: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'GEOPOLITICS'],
@@ -77,6 +87,41 @@ function detectMacroTheme(text) {
     }
   }
   return 'GENERAL_MACRO';
+}
+
+function normalizeArticleKey(title) {
+  return String(title || '').trim().toLowerCase();
+}
+
+function normalizeMacroTheme(theme, fallbackText) {
+  const raw = String(theme || '').trim().toUpperCase();
+  if (MACRO_THEME_VALUES.has(raw)) {
+    return raw;
+  }
+  return detectMacroTheme(fallbackText);
+}
+
+function normalizeMacroTone(value, fallbackScore = 0) {
+  const raw = String(value || '').trim().toUpperCase();
+  if (['RISK_ON', 'RISK_OFF', 'BALANCED'].includes(raw)) {
+    return raw;
+  }
+  return fallbackScore >= 0.25 ? 'RISK_ON' : fallbackScore <= -0.25 ? 'RISK_OFF' : 'BALANCED';
+}
+
+function normalizeMacroScore(value, fallbackValue = 0) {
+  const parsed = Number(value);
+  const score = Number.isFinite(parsed) ? parsed : fallbackValue;
+  return parseFloat(clamp(score, -1, 1).toFixed(2));
+}
+
+function normalizeConfidence(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parseFloat(clamp(parsed, 0, 1).toFixed(2)) : null;
+}
+
+function sanitizeShortText(value, maxLength = 160) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
 }
 
 function summarizeThemeImpact(theme, sector, ticker) {
@@ -137,8 +182,175 @@ function scoreSentimentsWithRules(headlines) {
   return headlines.map((headline) => scoreHeadlineSentimentFallback(headline));
 }
 
+async function scoreMacroNewsWithLlm(articles, { ticker, sector } = {}, dependencies = {}) {
+  const llm = dependencies.callDeepSeek || callDeepSeek;
+  if (!Array.isArray(articles) || articles.length === 0 || typeof llm !== 'function') {
+    return articles;
+  }
+
+  const scopedArticles = dedupeArticlesByTitle(articles)
+    .sort((left, right) => (left.hoursAgo ?? 0) - (right.hoursAgo ?? 0))
+    .slice(0, 8)
+    .filter((article) => normalizeArticleKey(article.title));
+
+  if (scopedArticles.length === 0) {
+    return articles;
+  }
+
+  const systemPrompt = [
+    'You are a macro market headline classifier.',
+    'Classify each headline using headline text only.',
+    'Return JSON only in the format {"items":[{"id":number,"score":number,"theme":string,"marketTone":string,"confidence":number,"reason":string}]}',
+    'score must be between -1 and 1 and represent first-order broad market impact.',
+    'theme must be one of: GEOPOLITICS, MONETARY_POLICY, POLITICS_POLICY, ENERGY_COMMODITIES, MARKET_STRESS, SUPPLY_CHAIN, GENERAL_MACRO.',
+    'marketTone must be RISK_ON, RISK_OFF, or BALANCED.',
+    'Treat war escalation, sanctions, tariffs, persistent inflation, higher-for-longer rates, and oil supply disruptions as risk-off for broad equities unless the headline clearly indicates relief.',
+    'Keep reason under 14 words.',
+  ].join(' ');
+
+  const userMessage = [
+    `Ticker: ${ticker || 'UNKNOWN'}`,
+    `Sector: ${sector || 'Unknown'}`,
+    'Headlines:',
+    ...scopedArticles.map((article, index) => `${index + 1}. ${article.title}`),
+  ].join('\n');
+
+  try {
+    const response = await llm(systemPrompt, userMessage, 0.1, 800);
+    const parsed = parseJsonResponse(response, { items: [] });
+    const items = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.items)
+        ? parsed.items
+        : [];
+
+    const byKey = new Map();
+    for (let index = 0; index < scopedArticles.length; index += 1) {
+      const article = scopedArticles[index];
+      const item = items.find((candidate) => Number(candidate?.id) === index + 1) || items[index];
+      if (!item) continue;
+
+      const fallbackScore = safeNumber(article.sentiment);
+      const score = normalizeMacroScore(
+        item.score,
+        item.marketTone === 'RISK_ON' ? 0.45 : item.marketTone === 'RISK_OFF' ? -0.45 : fallbackScore
+      );
+
+      byKey.set(normalizeArticleKey(article.title), {
+        sentiment: score,
+        theme: normalizeMacroTheme(item.theme, `${article.title || ''} ${article.summary || ''}`),
+        marketTone: normalizeMacroTone(item.marketTone, score),
+        llmConfidence: normalizeConfidence(item.confidence),
+        llmReason: sanitizeShortText(item.reason),
+      });
+    }
+
+    if (byKey.size === 0) {
+      return articles;
+    }
+
+    return articles.map((article) => {
+      const classified = byKey.get(normalizeArticleKey(article.title));
+      if (!classified) {
+        return article;
+      }
+
+      return {
+        ...article,
+        sentiment: classified.sentiment,
+        theme: classified.theme,
+        marketTone: classified.marketTone,
+        llmConfidence: classified.llmConfidence,
+        llmReason: classified.llmReason,
+        sentimentMethod: 'llm',
+      };
+    });
+  } catch {
+    return articles;
+  }
+}
+
+async function scoreCompanyNewsWithLlm(articles, { ticker, sector, companyName } = {}, dependencies = {}) {
+  const llm = dependencies.callDeepSeek || callDeepSeek;
+  if (!Array.isArray(articles) || articles.length === 0 || typeof llm !== 'function') {
+    return articles;
+  }
+
+  const scopedArticles = dedupeArticlesByTitle(articles)
+    .sort((left, right) => (left.hoursAgo ?? 0) - (right.hoursAgo ?? 0))
+    .slice(0, 6)
+    .filter((article) => normalizeArticleKey(article.title));
+
+  if (scopedArticles.length === 0) {
+    return articles;
+  }
+
+  const systemPrompt = [
+    'You are an equity headline sentiment classifier.',
+    'Judge each headline by its likely directional impact on the named stock, not the overall market.',
+    'Use headline text only.',
+    'Return JSON only in the format {"items":[{"id":number,"score":number,"confidence":number,"reason":string}]}',
+    'score must be between -1 and 1 where positive is bullish for the stock and negative is bearish for the stock.',
+    'Penalize misses, downgrades, legal risk, margin pressure, layoffs, demand weakness, and regulatory pressure.',
+    'Reward beats, upgrades, new product wins, approvals, demand strength, expansion, and margin improvement.',
+    'Keep reason under 12 words.',
+  ].join(' ');
+
+  const userMessage = [
+    `Ticker: ${ticker || 'UNKNOWN'}`,
+    `Company: ${companyName || ticker || 'Unknown company'}`,
+    `Sector: ${sector || 'Unknown'}`,
+    'Headlines:',
+    ...scopedArticles.map((article, index) => `${index + 1}. ${article.title}`),
+  ].join('\n');
+
+  try {
+    const response = await llm(systemPrompt, userMessage, 0.1, 700);
+    const parsed = parseJsonResponse(response, { items: [] });
+    const items = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.items)
+        ? parsed.items
+        : [];
+
+    const byKey = new Map();
+    for (let index = 0; index < scopedArticles.length; index += 1) {
+      const article = scopedArticles[index];
+      const item = items.find((candidate) => Number(candidate?.id) === index + 1) || items[index];
+      if (!item) continue;
+
+      byKey.set(normalizeArticleKey(article.title), {
+        sentiment: normalizeMacroScore(item.score, safeNumber(article.sentiment)),
+        llmConfidence: normalizeConfidence(item.confidence),
+        llmReason: sanitizeShortText(item.reason),
+      });
+    }
+
+    if (byKey.size === 0) {
+      return articles;
+    }
+
+    return articles.map((article) => {
+      const classified = byKey.get(normalizeArticleKey(article.title));
+      if (!classified) {
+        return article;
+      }
+
+      return {
+        ...article,
+        sentiment: classified.sentiment,
+        llmConfidence: classified.llmConfidence,
+        llmReason: classified.llmReason,
+        sentimentMethod: 'llm',
+      };
+    });
+  } catch {
+    return articles;
+  }
+}
+
 // Fetch news from Finnhub
-async function fetchFinnhubNews(ticker) {
+async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
   const apiKey = config.finnhubApiKey;
   if (!apiKey) return null;
 
@@ -156,14 +368,42 @@ async function fetchFinnhubNews(ticker) {
     const headlines = articles.map(a => a.headline || '');
     const scores = scoreSentimentsWithRules(headlines);
 
-    return articles.map((article, i) => ({
+    const ruleScoredNews = articles.map((article, i) => ({
       title: article.headline || '',
-      summary: article.summary || '',
+      summary: (article.summary || article.description || article.lead_image || article.text || '').substring(0, 200), // Try multiple fields, cap at 200 chars
       url: article.url || '',
       source: article.source || 'Finnhub',
       sentiment: scores[i] ?? 0,
       hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
     }));
+
+    // Filter to only send relevant company news to LLM
+    const companyName = context.companyName || `${ticker} Corp.`;
+    const searchTerms = [
+      ticker.toUpperCase(),
+      ticker.split('.')[0].toUpperCase(), // Base ticker without exchange code
+      ...(companyName.split(' ').slice(0, 3)), // First 3 words of company name
+    ];
+    const relevantNews = ruleScoredNews.filter((news) => {
+      const headline = (news.title || '').toUpperCase();
+      return searchTerms.some((term) => headline.includes(term.toUpperCase()));
+    });
+
+    // Only score relevant company news with LLM
+    if (relevantNews.length > 0) {
+      const llmScored = await scoreCompanyNewsWithLlm(relevantNews, {
+        ticker,
+        sector: context.sector,
+        companyName: context.companyName,
+      }, dependencies);
+      // Merge LLM-scored news back into full list
+      return ruleScoredNews.map((news) => {
+        const llmVersion = llmScored.find((n) => n.title === news.title);
+        return llmVersion || news;
+      });
+    }
+
+    return ruleScoredNews;
   } catch (error) {
     console.error('Finnhub news fetch failed:', error.message);
     return null;
@@ -356,6 +596,53 @@ async function fetchFinnhubQuote(ticker) {
   }
 }
 
+async function fetchFinnhubCandles(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return null;
+
+  try {
+    const to = Math.floor(Date.now() / 1000);
+    const from = to - (220 * 24 * 3600);
+    const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(ticker)}&resolution=D&from=${from}&to=${to}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (data?.s !== 'ok' || !Array.isArray(data?.c) || !Array.isArray(data?.t)) {
+      return null;
+    }
+
+    const length = Math.min(
+      data.c.length,
+      Array.isArray(data.o) ? data.o.length : 0,
+      Array.isArray(data.h) ? data.h.length : 0,
+      Array.isArray(data.l) ? data.l.length : 0,
+      Array.isArray(data.v) ? data.v.length : 0,
+      data.t.length,
+    );
+
+    const candles = [];
+    for (let index = 0; index < length; index += 1) {
+      const close = safeNumber(data.c[index]);
+      if (close <= 0) continue;
+
+      candles.push({
+        date: new Date(safeNumber(data.t[index]) * 1000).toISOString().split('T')[0],
+        open: parseFloat(safeNumber(data.o[index]).toFixed(2)),
+        high: parseFloat(safeNumber(data.h[index]).toFixed(2)),
+        low: parseFloat(safeNumber(data.l[index]).toFixed(2)),
+        close: parseFloat(close.toFixed(2)),
+        volume: Math.floor(safeNumber(data.v[index])),
+      });
+    }
+
+    return candles.filter((bar) => bar.close > 0);
+  } catch (error) {
+    console.error('Finnhub candles fetch failed:', error.message);
+    return null;
+  }
+}
+
 // Fetch comprehensive metrics from Finnhub (includes PE, EPS) 
 async function fetchFinnhubMetrics(ticker) {
   const apiKey = config.finnhubApiKey;
@@ -400,6 +687,177 @@ async function fetchFinnhubPriceTarget(ticker) {
   }
 }
 
+async function fetchFinnhubMarketData(ticker, dependencies = {}) {
+  if (!config.finnhubApiKey) {
+    throw new Error('FINNHUB_API_KEY is missing');
+  }
+
+  const [quoteResult, profileResult, metricsResult, candlesResult, recommendationsResult, priceTargetResult] = await Promise.allSettled([
+    withTimeout(fetchFinnhubQuote(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub quote fetch for ${ticker}`),
+    withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
+    withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
+    withTimeout(fetchFinnhubCandles(ticker), REAL_DATA_TIMEOUT_MS, `Finnhub candles fetch for ${ticker}`),
+    withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
+    withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
+  ]);
+
+  const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
+  const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
+  const metrics = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
+  let priceHistory = candlesResult.status === 'fulfilled' ? candlesResult.value : null;
+  const recommendations = recommendationsResult.status === 'fulfilled' ? recommendationsResult.value : null;
+  const priceTarget = priceTargetResult.status === 'fulfilled' ? priceTargetResult.value : null;
+  let priceHistorySource = 'finnhub';
+
+  if (!Array.isArray(priceHistory) || priceHistory.length < 50) {
+    const alphaHistory = await fetchAlphaVantagePriceHistory(ticker);
+    if (!Array.isArray(alphaHistory?.priceHistory) || alphaHistory.priceHistory.length < 50) {
+      throw new Error('Finnhub returned insufficient price history');
+    }
+
+    priceHistory = alphaHistory.priceHistory;
+    priceHistorySource = 'alpha-vantage-history';
+  }
+
+  const closes = priceHistory.map((day) => day.close).filter((value) => value > 0);
+  const volumes = priceHistory.map((day) => day.volume).filter((value) => value >= 0);
+  const highs = priceHistory.map((day) => day.high).filter((value) => value > 0);
+  const lows = priceHistory.map((day) => day.low).filter((value) => value > 0);
+
+  const latestBar = priceHistory[priceHistory.length - 1];
+  const previousBar = priceHistory[priceHistory.length - 2] || latestBar;
+  const price = safeNumber(quote?.c, latestBar?.close);
+  const prevClose = safeNumber(quote?.pc, previousBar?.close || price);
+  const change = quote && Number.isFinite(Number(quote.d)) ? safeNumber(quote.d) : price - prevClose;
+  const changePercent = quote && Number.isFinite(Number(quote.dp))
+    ? safeNumber(quote.dp)
+    : prevClose === 0
+      ? 0
+      : (change / prevClose) * 100;
+
+  const ma20 = closes.slice(-20).reduce((sum, value) => sum + value, 0) / Math.min(20, closes.length);
+  const ma50 = closes.slice(-50).reduce((sum, value) => sum + value, 0) / Math.min(50, closes.length);
+  const ma200 = closes.length >= 200
+    ? closes.slice(-200).reduce((sum, value) => sum + value, 0) / 200
+    : ma50;
+
+  const gains = [];
+  const losses = [];
+  for (let index = 1; index < closes.length; index += 1) {
+    const diff = closes[index] - closes[index - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? Math.abs(diff) : 0);
+  }
+
+  const recentGains = gains.slice(-14);
+  const recentLosses = losses.slice(-14);
+  const avgGain = recentGains.reduce((sum, value) => sum + value, 0) / (recentGains.length || 1);
+  const avgLoss = recentLosses.reduce((sum, value) => sum + value, 0) / (recentLosses.length || 1);
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  const rsi = parseFloat((100 - 100 / (1 + rs)).toFixed(1));
+  const avgVolume = volumes.slice(-20).reduce((sum, value) => sum + value, 0) / Math.max(1, Math.min(volumes.length, 20));
+  const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
+
+  const companyName = profile?.name || `${ticker} Corp.`;
+  const sector = profile?.sector || 'Unknown';
+
+  const [companyNewsResult, finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+    withTimeout(fetchFinnhubNews(ticker, {
+      sector,
+      companyName,
+    }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
+    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+  ]);
+
+  const companyNews = companyNewsResult.status === 'fulfilled' ? companyNewsResult.value : [];
+  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
+  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+  const macroNews = await scoreMacroNewsWithLlm(
+    [...finnhubMacroNews, ...newsApiMacroNews],
+    { ticker, sector },
+    dependencies
+  );
+
+  const sentimentScore = Array.isArray(companyNews) && companyNews.length > 0
+    ? parseFloat((companyNews.reduce((sum, article) => sum + safeNumber(article.sentiment), 0) / companyNews.length).toFixed(2))
+    : 0;
+  const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
+
+  const consensus = recommendations || {
+    strongBuy: 0,
+    buy: 0,
+    hold: 0,
+    sell: 0,
+    strongSell: 0,
+  };
+
+  let targetHigh;
+  let targetLow;
+  let targetMean;
+  if (priceTarget && priceTarget.targetHigh > 0 && priceTarget.targetLow > 0) {
+    targetHigh = priceTarget.targetHigh;
+    targetLow = priceTarget.targetLow;
+    targetMean = priceTarget.targetMean || (targetHigh + targetLow) / 2;
+  } else {
+    targetHigh = price * 1.12;
+    targetLow = price * 0.9;
+    targetMean = (targetHigh + targetLow) / 2;
+  }
+
+  return {
+    ticker,
+    name: companyName,
+    sector,
+    price: parseFloat(price.toFixed(2)),
+    prevClose: parseFloat(prevClose.toFixed(2)),
+    change: parseFloat(change.toFixed(2)),
+    changePercent: parseFloat(changePercent.toFixed(2)),
+    volume: Math.floor(safeNumber(quote?.v, latestBar?.volume)),
+    avgVolume: Math.floor(avgVolume),
+    high52w: parseFloat(Math.max(...highs).toFixed(2)),
+    low52w: parseFloat(Math.min(...lows).toFixed(2)),
+    marketCap: profile?.marketCap || 0,
+    pe: metrics?.pe || 0,
+    eps: metrics?.eps || 0,
+    ma20: parseFloat(ma20.toFixed(2)),
+    ma50: parseFloat(ma50.toFixed(2)),
+    ma200: parseFloat(ma200.toFixed(2)),
+    rsi,
+    trend,
+    sentimentScore,
+    sentimentLabel,
+    analystConsensus: {
+      ...consensus,
+      targetHigh: parseFloat(targetHigh.toFixed(2)),
+      targetLow: parseFloat(targetLow.toFixed(2)),
+      targetMean: parseFloat(targetMean.toFixed(2)),
+      upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
+    },
+    news: Array.isArray(companyNews) ? companyNews : [],
+    macroContext: buildMacroContext({
+      ticker,
+      sector,
+      macroNews,
+    }),
+    priceHistory,
+    technicalIndicators: calculateAllIndicators(priceHistory),
+    collectedAt: new Date().toISOString(),
+    dataSource: 'finnhub',
+    fallbackReason: priceHistorySource === 'finnhub' ? null : 'Finnhub candle history unavailable; Alpha Vantage used for price history.',
+    priceHistorySource,
+    finnhubData: {
+      profile: !!profile,
+      metrics: !!metrics,
+      news: Array.isArray(companyNews) ? companyNews.length : 0,
+      recommendations: !!recommendations,
+      priceTarget: !!priceTarget,
+      candles: priceHistory.length,
+      quote: !!quote,
+    },
+  };
+}
+
 
 // Singleton Yahoo Finance instance
 let _yf = null;
@@ -414,11 +872,15 @@ function getYahooFinance() {
   return _yf;
 }
 
-async function fetchYahooFinanceData(ticker) {
+async function fetchYahooFinanceData(ticker, dependencies = {}) {
+  const perfMs = {};
+  const startTotal = Date.now();
+
   const yf = getYahooFinance();
   const to = new Date();
   const from = new Date(Date.now() - 120 * 24 * 3600 * 1000);
 
+  const startApi = Date.now();
   const [chart, summary] = await Promise.all([
     withTimeout(yf.chart(ticker, {
       period1: from.toISOString().split('T')[0],
@@ -432,6 +894,7 @@ async function fetchYahooFinanceData(ticker) {
       modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend'],
     }), REAL_DATA_TIMEOUT_MS, `Yahoo quote summary fetch for ${ticker}`),
   ]);
+  perfMs.yahooPriceApi = Date.now() - startApi;
 
   const validHistory = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
 
@@ -485,52 +948,105 @@ async function fetchYahooFinanceData(ticker) {
   const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
 
   // News from Finnhub is US-focused; for non-US tickers use Yahoo Finance search news fallback
-  const yahooNews = await (async () => {
-    try {
-      const results = await withTimeout(
-        yf.search(ticker, { newsCount: 5, quotesCount: 0 }),
-        ENRICHMENT_TIMEOUT_MS,
-        `Yahoo news search for ${ticker}`
-      );
-      const items = (results.news || []).slice(0, 5);
-      const headlines = items.map((n) => n.title || '');
-      const scores = scoreSentimentsWithRules(headlines);
-      return items.map((n, i) => ({
-        title: n.title || '',
-        summary: n.summary || n.description || '',
-        url: n.link || '',
-        source: n.publisher || 'Yahoo Finance',
-        sentiment: scores[i] ?? 0,
-        hoursAgo: (() => {
-          const ts = n.providerPublishTime;
-          if (!ts) return 0;
-          let publishMs = 0;
-          if (typeof ts === 'number') {
-            publishMs = ts > 1e12 ? ts : ts * 1000;
-          } else if (typeof ts === 'string') {
-            if (/^\d+$/.test(ts)) {
-              const numericTs = Number(ts);
-              publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
-            } else {
-              publishMs = Date.parse(ts);
+  const startNews = Date.now();
+  
+  // parallelize company news LLM and macro news LLM
+  const [yahooNews, macroNews] = await Promise.all([
+    (async () => {
+      try {
+        const startYahooNews = Date.now();
+        const results = await withTimeout(
+          yf.search(ticker, { newsCount: 5, quotesCount: 0 }),
+          ENRICHMENT_TIMEOUT_MS,
+          `Yahoo news search for ${ticker}`
+        );
+        perfMs.yahooNewsSearch = Date.now() - startYahooNews;
+
+        const items = (results.news || []).slice(0, 5);
+        const headlines = items.map((n) => n.title || '');
+        const scores = scoreSentimentsWithRules(headlines);
+        const ruleScoredNews = items.map((n, i) => ({
+          title: n.title || '',
+        summary: (n.summary || n.description || '').substring(0, 200), // Cap at 200 chars
+          sentiment: scores[i] ?? 0,
+          hoursAgo: (() => {
+            const ts = n.providerPublishTime;
+            if (!ts) return 0;
+            let publishMs = 0;
+            if (typeof ts === 'number') {
+              publishMs = ts > 1e12 ? ts : ts * 1000;
+            } else if (typeof ts === 'string') {
+              if (/^\d+$/.test(ts)) {
+                const numericTs = Number(ts);
+                publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
+              } else {
+                publishMs = Date.parse(ts);
+              }
             }
-          }
-          if (!Number.isFinite(publishMs) || publishMs <= 0) return 0;
-          return Math.max(0, Math.round((Date.now() - publishMs) / 3600000));
-        })(),
-      }));
-    } catch {
-      return [];
-    }
-  })();
+            if (!Number.isFinite(publishMs) || publishMs <= 0) return 0;
+            return Math.max(0, Math.round((Date.now() - publishMs) / 3600000));
+          })(),
+        }));
 
-  const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
-    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
-    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+        // For international tickers, only send to LLM if news mentions ticker or company name
+        const companyName = priceMod.longName || priceMod.shortName || ticker;
+        const searchTerms = [
+          ticker.toUpperCase(),
+          ticker.split('.')[0].toUpperCase(), // Base ticker without exchange code
+          ...(companyName.split(' ').slice(0, 3)), // First 3 words of company name
+        ];
+        const relevantNews = ruleScoredNews.filter((news) => {
+          const headline = (news.title || '').toUpperCase();
+          return searchTerms.some((term) => headline.includes(term.toUpperCase()));
+        });
+
+        const startCompanyLlm = Date.now();
+        let result = ruleScoredNews;
+        if (relevantNews.length > 0) {
+          // Only score relevant company news with LLM
+          const llmScored = await scoreCompanyNewsWithLlm(relevantNews, {
+            ticker,
+            sector: sp.sector || sp.industry || 'Unknown',
+            companyName,
+          }, dependencies);
+          // Merge LLM-scored news back into full list
+          result = ruleScoredNews.map((news) => {
+            const llmVersion = llmScored.find((n) => n.title === news.title);
+            return llmVersion || news;
+          });
+        }
+        perfMs.companyNewsLlm = Date.now() - startCompanyLlm;
+        return result;
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      try {
+        const startMacroFetch = Date.now();
+        const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+          withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+          withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+        ]);
+        perfMs.macroNewsFetch = Date.now() - startMacroFetch;
+
+        const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
+        const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+        
+        const startMacroLlm = Date.now();
+        const result = await scoreMacroNewsWithLlm(
+          [...finnhubMacroNews, ...newsApiMacroNews],
+          { ticker, sector: sp.sector || sp.industry || 'Unknown' },
+          dependencies
+        );
+        perfMs.macroNewsLlm = Date.now() - startMacroLlm;
+        return result;
+      } catch {
+        return [];
+      }
+    })(),
   ]);
-
-  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
-  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+  perfMs.newsTotal = Date.now() - startNews;
 
   const sentimentScore = yahooNews.length > 0
     ? parseFloat((yahooNews.reduce((s, n) => s + (n.sentiment || 0), 0) / yahooNews.length).toFixed(2))
@@ -581,13 +1097,22 @@ async function fetchYahooFinanceData(ticker) {
     macroContext: buildMacroContext({
       ticker,
       sector: sp.sector || sp.industry || 'Unknown',
-      macroNews: [...finnhubMacroNews, ...newsApiMacroNews],
+      macroNews,
     }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'yahoo-finance',
     fallbackReason: null,
+    perfMs: {
+      total: Date.now() - startTotal,
+      yahooPriceApi: perfMs.yahooPriceApi,
+      yahooNewsSearch: perfMs.yahooNewsSearch,
+      companyNewsLlm: perfMs.companyNewsLlm,
+      newsTotal: perfMs.newsTotal,
+      macroNewsFetch: perfMs.macroNewsFetch,
+      macroNewsLlm: perfMs.macroNewsLlm,
+    },
   };
 }
 
@@ -748,54 +1273,10 @@ function generateMockMarketData(ticker) {
   };
 }
 
-async function fetchAlphaVantageMarketData(ticker) {
-  const apiKey = config.alphaVantageApiKey;
-  if (!apiKey || apiKey === 'demo') {
-    throw new Error('ALPHA_VANTAGE_API_KEY is missing or set to demo');
-  }
-
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=compact&apikey=${apiKey}`;
-  const response = await withTimeout(fetch(url), REAL_DATA_TIMEOUT_MS, `Alpha Vantage core price fetch for ${ticker}`);
-
-  if (!response.ok) {
-    throw new Error(`Alpha Vantage request failed: ${response.status}`);
-  }
-
-  const payload = await response.json();
-  if (payload['Error Message']) {
-    throw new Error(payload['Error Message']);
-  }
-  if (payload.Information) {
-    throw new Error(payload.Information);
-  }
-  if (payload.Note) {
-    throw new Error(payload.Note);
-  }
-
-  const series = payload['Time Series (Daily)'];
-  if (!series || typeof series !== 'object') {
-    throw new Error('Missing time series data from Alpha Vantage');
-  }
-
-  const allDates = Object.keys(series).sort();
-  if (allDates.length < 20) {
-    throw new Error('Not enough history returned by Alpha Vantage');
-  }
+async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
+  const { priceHistory, allDates, series } = await fetchAlphaVantagePriceHistory(ticker);
 
   const getVolume = (candle) => safeNumber(candle['6. volume'] ?? candle['5. volume']);
-
-  const recentDatesAsc = allDates.slice(-100);
-  const priceHistory = recentDatesAsc.map((date) => {
-    const candle = series[date] || {};
-    return {
-      date,
-      open: parseFloat(safeNumber(candle['1. open']).toFixed(2)),
-      high: parseFloat(safeNumber(candle['2. high']).toFixed(2)),
-      low: parseFloat(safeNumber(candle['3. low']).toFixed(2)),
-      close: parseFloat(safeNumber(candle['4. close']).toFixed(2)),
-      volume: Math.floor(getVolume(candle)),
-    };
-  });
 
   const latestDate = allDates[allDates.length - 1];
   const prevDate = allDates[allDates.length - 2];
@@ -849,7 +1330,10 @@ async function fetchAlphaVantageMarketData(ticker) {
     const enrichmentResults = await Promise.allSettled([
       withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
       withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
-      withTimeout(fetchFinnhubNews(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
+      withTimeout(fetchFinnhubNews(ticker, {
+        sector: finnhubProfile?.sector || 'Unknown',
+        companyName: finnhubProfile?.name || `${ticker} Corp.`,
+      }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
       withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
       withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
     ]);
@@ -875,6 +1359,11 @@ async function fetchAlphaVantageMarketData(ticker) {
   const pe = finnhubMetrics?.pe || 0;
   const eps = finnhubMetrics?.eps || 0;
   const marketCap = finnhubProfile?.marketCap || 0;
+  const macroNews = await scoreMacroNewsWithLlm(
+    [...finnhubMacroNews, ...newsApiMacroNews],
+    { ticker, sector },
+    dependencies
+  );
 
   // Compute sentiment from news headlines (guard against null return from Finnhub)
   const news = Array.isArray(finnhubNews) && finnhubNews.length > 0 ? finnhubNews : [];
@@ -939,7 +1428,7 @@ async function fetchAlphaVantageMarketData(ticker) {
     macroContext: buildMacroContext({
       ticker,
       sector,
-      macroNews: [...finnhubMacroNews, ...newsApiMacroNews],
+      macroNews,
     }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
@@ -953,6 +1442,57 @@ async function fetchAlphaVantageMarketData(ticker) {
       priceTarget: !!finnhubPriceTarget,
     },
   };
+}
+
+async function fetchAlphaVantagePriceHistory(ticker) {
+  const apiKey = config.alphaVantageApiKey;
+  if (!apiKey || apiKey === 'demo') {
+    throw new Error('ALPHA_VANTAGE_API_KEY is missing or set to demo');
+  }
+
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=compact&apikey=${apiKey}`;
+  const response = await withTimeout(fetch(url), REAL_DATA_TIMEOUT_MS, `Alpha Vantage core price fetch for ${ticker}`);
+
+  if (!response.ok) {
+    throw new Error(`Alpha Vantage request failed: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (payload['Error Message']) {
+    throw new Error(payload['Error Message']);
+  }
+  if (payload.Information) {
+    throw new Error(payload.Information);
+  }
+  if (payload.Note) {
+    throw new Error(payload.Note);
+  }
+
+  const series = payload['Time Series (Daily)'];
+  if (!series || typeof series !== 'object') {
+    throw new Error('Missing time series data from Alpha Vantage');
+  }
+
+  const allDates = Object.keys(series).sort();
+  if (allDates.length < 20) {
+    throw new Error('Not enough history returned by Alpha Vantage');
+  }
+
+  const getVolume = (candle) => safeNumber(candle['6. volume'] ?? candle['5. volume']);
+  const recentDatesAsc = allDates.slice(-100);
+  const priceHistory = recentDatesAsc.map((date) => {
+    const candle = series[date] || {};
+    return {
+      date,
+      open: parseFloat(safeNumber(candle['1. open']).toFixed(2)),
+      high: parseFloat(safeNumber(candle['2. high']).toFixed(2)),
+      low: parseFloat(safeNumber(candle['3. low']).toFixed(2)),
+      close: parseFloat(safeNumber(candle['4. close']).toFixed(2)),
+      volume: Math.floor(getVolume(candle)),
+    };
+  });
+
+  return { priceHistory, allDates, series };
 }
 
 function buildFallbackAnalysis(ticker, marketData) {
@@ -991,9 +1531,13 @@ async function runMarketIntelligence({ ticker }, dependencies = {}) {
   let marketData;
   try {
     if (isInternational) {
-      marketData = await fetchYahooFinanceData(cleanTicker);
+      marketData = await fetchYahooFinanceData(cleanTicker, dependencies);
     } else {
-      marketData = await fetchAlphaVantageMarketData(cleanTicker);
+      try {
+        marketData = await fetchFinnhubMarketData(cleanTicker, dependencies);
+      } catch {
+        marketData = await fetchAlphaVantageMarketData(cleanTicker, dependencies);
+      }
     }
   } catch (error) {
     marketData = generateMockMarketData(cleanTicker);
@@ -1012,4 +1556,6 @@ async function runMarketIntelligence({ ticker }, dependencies = {}) {
 module.exports = {
   generateMockMarketData,
   runMarketIntelligence,
+  scoreCompanyNewsWithLlm,
+  scoreMacroNewsWithLlm,
 };

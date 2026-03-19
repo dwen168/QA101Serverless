@@ -22,39 +22,33 @@ async function routeChatMessage({ message, history = [] }) {
     return 'trade-recommendation';
   };
 
-  const systemPrompt = `You are QuantBot, an AI-powered quantitative analysis assistant. You help users analyze stocks using specialized Agent Skills:
+  const systemPrompt = `You are QuantBot, a quantitative analysis assistant.
 
-1. **market-intelligence** — Collects price trends, news, consensus, and sentiment
-2. **eda-visual-analysis** — Performs visual exploratory data analysis
-3. **trade-recommendation** — Generates BUY/HOLD/SELL recommendations
-4. **portfolio-optimization** — Optimizes allocation and ranking across multiple stocks
-5. **backtesting** — Replays a strategy on historical data and evaluates performance metrics
-
-When a user mentions a stock ticker or asks to analyze a stock, you MUST:
-1. Acknowledge you'll run the analysis
-2. Return a JSON command to trigger the skill pipeline
-
-ALWAYS respond with a JSON object in this format:
+Return ONLY a valid JSON object (no markdown, no code fences, no extra keys) with this schema:
 {
-  "message": "Your conversational response here",
-  "action": null OR "ANALYZE_STOCK" OR "OPTIMIZE_PORTFOLIO" OR "RUN_BACKTEST",
-  "ticker": null OR "TICKER_SYMBOL",
-  "tickers": null OR ["TICKER1", "TICKER2", "..."],
-  "timeHorizon": null OR "SHORT" OR "MEDIUM" OR "LONG",
-  "startDate": null OR "YYYY-MM-DD",
-  "endDate": null OR "YYYY-MM-DD",
-  "strategyName": null OR "trade-recommendation" OR "macd-bb" OR "rsi-ma",
-  "skillSequence": null OR ["market-intelligence", "eda-visual-analysis", "trade-recommendation"]
+  "message": "string",
+  "action": null | "ANALYZE_STOCK" | "OPTIMIZE_PORTFOLIO" | "RUN_BACKTEST",
+  "ticker": null | "TICKER",
+  "tickers": null | ["TICKER1", "TICKER2"],
+  "timeHorizon": null | "SHORT" | "MEDIUM" | "LONG",
+  "startDate": null | "YYYY-MM-DD",
+  "endDate": null | "YYYY-MM-DD",
+  "strategyName": null | "trade-recommendation" | "macd-bb" | "rsi-ma",
+  "skillSequence": null | ["market-intelligence", "eda-visual-analysis", "trade-recommendation"] | ["portfolio-optimization"] | ["backtesting"]
 }
 
-For non-stock questions, set action to null and just respond conversationally.
-For stock analysis requests, extract the ticker and set action to "ANALYZE_STOCK".
-For portfolio optimization requests with multiple tickers, set action to "OPTIMIZE_PORTFOLIO" and provide tickers array.
-For backtest requests, set action to "RUN_BACKTEST" and include ticker, startDate, endDate, and strategyName.
+Routing rules:
+- Non-stock/general chat: action = null.
+- Stock analysis intent or ticker-only request: action = "ANALYZE_STOCK", set ticker, skillSequence = ["market-intelligence", "eda-visual-analysis", "trade-recommendation"].
+- Portfolio optimization intent: action = "OPTIMIZE_PORTFOLIO", set tickers array (>= 2), skillSequence = ["portfolio-optimization"].
+- Backtest intent: action = "RUN_BACKTEST", set ticker, startDate, endDate, strategyName, skillSequence = ["backtesting"].
 
-Common tickers: AAPL (Apple), TSLA (Tesla), NVDA (Nvidia), MSFT (Microsoft), AMZN (Amazon), GOOGL (Google), META (Meta).
+Output safety rules:
+- If uncertain, prefer action = null instead of guessing.
+- Ensure output is strict JSON parseable by JSON.parse.
+- Never include comments, trailing commas, or explanatory text outside the JSON object.
 
-Be concise, professional, and enthusiastic about quantitative analysis.`;
+If a field is unknown, set it to null. Keep message concise and professional.`;
 
   const messages = [
     ...history.map((entry) => ({ role: entry.role, content: entry.content })),
