@@ -160,22 +160,68 @@ function buildFallbackInsights(marketData) {
   };
 }
 
+function normalizeMomentumSignal(value, fallbackValue = 'NEUTRAL') {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return fallbackValue;
+
+  if (['POSITIVE', 'NEGATIVE', 'NEUTRAL'].includes(raw)) {
+    return raw;
+  }
+
+  if (/BULL|UP|STRONG_UP|RISING|GAIN/.test(raw)) {
+    return 'POSITIVE';
+  }
+  if (/BEAR|DOWN|STRONG_DOWN|FALL|LOSS/.test(raw)) {
+    return 'NEGATIVE';
+  }
+  if (/N\/A|NA|UNKNOWN|NONE/.test(raw)) {
+    return fallbackValue;
+  }
+
+  return fallbackValue;
+}
+
+function sanitizeText(value) {
+  return String(value || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeEdaInsights(parsed, fallback) {
+  const insights = Array.isArray(parsed?.insights)
+    ? parsed.insights.map((item) => sanitizeText(item)).filter(Boolean).slice(0, 6)
+    : [];
+
+  const riskFlags = Array.isArray(parsed?.riskFlags)
+    ? parsed.riskFlags.map((item) => sanitizeText(item)).filter(Boolean).slice(0, 6)
+    : [];
+
+  const technicalSummary = sanitizeText(parsed?.technicalSummary) || fallback.technicalSummary;
+  const momentumSignal = normalizeMomentumSignal(parsed?.momentumSignal, fallback.momentumSignal);
+
+  return {
+    insights: insights.length > 0 ? insights : fallback.insights,
+    riskFlags,
+    technicalSummary,
+    momentumSignal,
+    edaFactors: fallback.edaFactors,
+  };
+}
+
 async function runEdaVisualAnalysis({ marketData }, dependencies = {}) {
   requireObject(marketData, 'marketData');
 
   const charts = buildCharts(marketData);
   const fallback = buildFallbackInsights(marketData);
   const llm = dependencies.callDeepSeek || callDeepSeek;
-  const systemPrompt = `You are a quantitative analyst running the eda-visual-analysis skill.\n\n${skills['eda-visual-analysis']}\n\nAnalyze the market data and provide key EDA insights as JSON.`;
-  const userMessage = `Provide EDA insights for ${marketData.ticker}. Return JSON with: insights (array of 4 key observations), riskFlags (array of strings), technicalSummary (1-2 sentences), momentumSignal (POSITIVE/NEGATIVE/NEUTRAL). Market data summary: Price: ${marketData.price}, RSI: ${marketData.rsi}, Trend: ${marketData.trend}, Sentiment: ${marketData.sentimentScore}, MA20: ${marketData.ma20}, MA50: ${marketData.ma50}`;
+  const systemPrompt = `You are a quantitative analyst running the eda-visual-analysis skill.\n\n${skills['eda-visual-analysis']}\n\nAnalyze the market data and provide key EDA insights as JSON only. Do not include markdown, tables, explanations, or code fences.`;
+  const userMessage = `Provide EDA insights for ${marketData.ticker}. Return JSON with: insights (array of 4 key observations), riskFlags (array of strings), technicalSummary (1-2 sentences), momentumSignal (POSITIVE/NEGATIVE/NEUTRAL).\n\nContext:\n- Price=${marketData.price}, Change%=${marketData.changePercent}, RSI=${marketData.rsi}, Trend=${marketData.trend}\n- MA20=${marketData.ma20}, MA50=${marketData.ma50}, MA200=${marketData.ma200}\n- SentimentScore=${marketData.sentimentScore}, SentimentLabel=${marketData.sentimentLabel}\n- MacroRisk=${marketData.macroContext?.riskLevel || 'N/A'}, MacroTone=${marketData.macroContext?.sentimentLabel || 'N/A'}\n- MacroContext=${marketData.macroContext?.marketContext || 'N/A'}\n- TopNews=${(marketData.news || []).slice(0, 5).map((item) => `${item.title} [${item.sentiment}]`).join(' | ')}\n- Indicators=${JSON.stringify(marketData.technicalIndicators || {}, null, 2)}`;
 
   try {
     const analysis = await llm(systemPrompt, userMessage);
-    const parsed = parseJsonResponse(analysis, fallback);
-    const edaInsights = {
-      ...parsed,
-      edaFactors: fallback.edaFactors,
-    };
+    const parsed = parseJsonResponse(analysis, {});
+    const edaInsights = normalizeEdaInsights(parsed, fallback);
     return { charts, edaInsights, skillUsed: 'eda-visual-analysis' };
   } catch {
     return { charts, edaInsights: fallback, skillUsed: 'eda-visual-analysis' };

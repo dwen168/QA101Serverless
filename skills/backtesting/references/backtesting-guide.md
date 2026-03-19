@@ -13,6 +13,12 @@ Backtesting is the process of simulating a trading strategy on historical data t
 ### 1. Historical Data Quality
 **Critical:** Backtesting is only as good as your data.
 
+**Current QuantBot retrieval path:**
+- Try Alpha Vantage first
+- Fall back to Yahoo Finance if Alpha Vantage is unavailable, rate-limited, or times out
+- Report the resolved source as `backtestReport.dataSource`
+- Apply configurable per-source timeouts so slow vendors do not stall the entire run
+
 **Data requirements:**
 - ✅ Adjusted prices (dividends, splits removed)
 - ✅ Complete trading days (no missing data)
@@ -53,6 +59,8 @@ QuantBot supports multiple signal types:
 4. **End of period:** Force-close remaining position
 
 **Key assumption:** You can execute at close price (realistic for EOD strategies, not intraday scalping)
+
+**Practical note:** If historical data cannot be retrieved from either live source with sufficient depth, the run should fail clearly instead of silently inventing prices.
 
 ### 4. Performance Metrics
 
@@ -216,6 +224,17 @@ if future_return[tomorrow] > 5%:  # ❌ Can't know this today!
 - Bid-ask: $0.01-0.10 per share
 
 **Prevention:** Subtract 0.2% per trade as buffer.
+
+### Pitfall #6: Ignoring Data Source Degradation
+**Problem:** Treating a fallback source exactly the same as the preferred source without surfacing it to the user.
+
+**Why it matters:**
+- Different vendors may have slightly different adjustments, timestamps, or missing bars
+- A backtest run based on Yahoo fallback may not be perfectly comparable to one based on Alpha Vantage
+
+**Prevention:**
+- Always record and display `backtestReport.dataSource`
+- Investigate repeated fallback use; it may indicate rate limits or timeout settings that are too aggressive
 
 ---
 

@@ -1,5 +1,4 @@
-const axios = require('axios');
-const config = require('./config');
+const { callLlm } = require('./llm');
 
 async function routeChatMessage({ message, history = [] }) {
   const parseDateRange = (raw) => {
@@ -63,27 +62,12 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
   ];
 
   try {
-    if (!config.deepseekApiKey) {
-      throw new Error('DEEPSEEK_API_KEY is not configured');
-    }
-
-    const response = await axios.post(
-      `${config.deepseekBaseUrl}/chat/completions`,
-      {
-        model: 'deepseek-chat',
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        temperature: 0.5,
-        max_tokens: 500,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${config.deepseekApiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    const content = response.data.choices[0].message.content;
+    const content = await callLlm({
+      systemPrompt,
+      messages,
+      temperature: 0.5,
+      maxTokens: 500,
+    });
     const cleaned = String(content || '').replace(/```json|```/g, '').trim();
     return JSON.parse(cleaned);
   } catch {

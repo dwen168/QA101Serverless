@@ -1,7 +1,37 @@
 function parseJsonResponse(rawText, fallbackValue) {
+  const source = String(rawText || '').trim();
+  if (!source) return fallbackValue;
+
+  const tryParse = (value) => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
   try {
-    const cleaned = String(rawText || '').replace(/```json|```/g, '').trim();
-    return JSON.parse(cleaned);
+    const cleaned = source.replace(/```json|```/gi, '').trim();
+    const direct = tryParse(cleaned);
+    if (direct !== null) return direct;
+
+    const objectStart = cleaned.indexOf('{');
+    const objectEnd = cleaned.lastIndexOf('}');
+    if (objectStart !== -1 && objectEnd > objectStart) {
+      const objectJson = cleaned.slice(objectStart, objectEnd + 1);
+      const objectParsed = tryParse(objectJson);
+      if (objectParsed !== null) return objectParsed;
+    }
+
+    const arrayStart = cleaned.indexOf('[');
+    const arrayEnd = cleaned.lastIndexOf(']');
+    if (arrayStart !== -1 && arrayEnd > arrayStart) {
+      const arrayJson = cleaned.slice(arrayStart, arrayEnd + 1);
+      const arrayParsed = tryParse(arrayJson);
+      if (arrayParsed !== null) return arrayParsed;
+    }
+
+    return fallbackValue;
   } catch {
     return fallbackValue;
   }

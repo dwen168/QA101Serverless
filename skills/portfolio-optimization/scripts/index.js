@@ -1,9 +1,5 @@
-const { callDeepSeek } = require('../../../backend/lib/llm');
-const { loadSkills } = require('../../../backend/lib/skill-loader');
-const { parseJsonResponse } = require('../../../backend/lib/utils');
+const config = require('../../../backend/lib/config');
 const { runMarketIntelligence } = require('../../market-intelligence/scripts');
-
-const skills = loadSkills();
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
@@ -12,6 +8,65 @@ function safeNumber(value, fallback = 0) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function summarizeDataSources(marketDataArray) {
+  const sourceBreakdown = {
+    live: 0,
+    mock: 0,
+    unknown: 0,
+  };
+
+  const details = (marketDataArray || []).map((item) => {
+    const rawSource = String(item?.dataSource || '').toLowerCase();
+    const source = rawSource || 'unknown';
+    const usedFallback = source === 'mock';
+
+    if (usedFallback) {
+      sourceBreakdown.mock += 1;
+    } else if (source === 'alpha-vantage' || source === 'yahoo-finance') {
+      sourceBreakdown.live += 1;
+    } else {
+      sourceBreakdown.unknown += 1;
+    }
+
+    return {
+      ticker: item?.ticker || 'UNKNOWN',
+      source,
+      usedFallback,
+      fallbackReason: item?.fallbackReason || null,
+    };
+  });
+
+  const total = details.length;
+  const hasMock = sourceBreakdown.mock > 0;
+  const allLive = total > 0 && sourceBreakdown.live === total;
+
+  let status = 'MIXED';
+  let message = `Mixed data sources across ${total} tickers.`;
+  if (allLive) {
+    status = 'LIVE';
+    message = `Live market data used for all ${total} tickers.`;
+  } else if (hasMock && sourceBreakdown.mock === total) {
+    status = 'MOCK';
+    message = `Mock data used for all ${total} tickers (live API unavailable).`;
+  } else if (hasMock) {
+    status = 'MIXED';
+    message = `Live data for ${sourceBreakdown.live}, mock data for ${sourceBreakdown.mock}, unknown for ${sourceBreakdown.unknown}.`;
+  }
+
+  return {
+    status,
+    allLive,
+    hasMock,
+    sourceBreakdown,
+    details,
+    message,
+  };
 }
 
 function computeMacroRegime(marketDataArray) {
@@ -388,6 +443,62 @@ function computeDiversificationMetrics(allocations, correlationMatrix) {
   };
 }
 
+function buildRuleBasedPortfolioNarrative({ rankedTickers, sectorAnalysis, diversificationMetrics, macroRegime, expectedReturn }) {
+  const top = rankedTickers[0];
+  const second = rankedTickers[1];
+  const strongestSector = sectorAnalysis[0];
+  const weakestSector = sectorAnalysis[sectorAnalysis.length - 1];
+
+  const executiveSummaryParts = [];
+  if (top) {
+    executiveSummaryParts.push(`${top.ticker} ranks #1 with a composite score of ${top.compositeScore.toFixed(1)} and ${top.action} signal`);
+  }
+  if (strongestSector) {
+    executiveSummaryParts.push(`strongest sector is ${strongestSector.sector} (${strongestSector.sectorStrength.toFixed(1)})`);
+  }
+  executiveSummaryParts.push(`expected blended upside is ${expectedReturn.toFixed(1)}%`);
+
+  const executiveSummary = `${executiveSummaryParts.join('; ')}.`;
+
+  const sectorRotationInsight = strongestSector && weakestSector
+    ? `Rotation favors ${strongestSector.sector} over ${weakestSector.sector}; consider overweighting leaders and trimming lagging sector exposure.`
+    : 'Sector rotation signal is limited due to sparse sector coverage.';
+
+  const diversificationAssessment = `Avg pairwise correlation is ${(diversificationMetrics.avgPairwiseCorrelation || 0).toFixed(3)} with ${diversificationMetrics.riskAssessment}.`;
+
+  const recommendations = [];
+  if (top && second) {
+    recommendations.push(`Prioritize top convictions: ${top.ticker}${second ? ` and ${second.ticker}` : ''}.`);
+  }
+  if ((diversificationMetrics.avgPairwiseCorrelation || 0) > 0.7) {
+    recommendations.push('Reduce concentration by adding lower-correlation names or increasing cash buffer.');
+  }
+  if (macroRegime?.riskLevel === 'HIGH') {
+    recommendations.push('Keep a defensive tilt while macro risk remains elevated.');
+  } else if (macroRegime?.riskLevel === 'LOW') {
+    recommendations.push('Macro backdrop is supportive; gradual risk-on rebalancing is reasonable.');
+  }
+
+  const riskWarnings = [];
+  if ((diversificationMetrics.avgPairwiseCorrelation || 0) > 0.8) {
+    riskWarnings.push('High correlation across holdings can amplify drawdowns during risk-off moves.');
+  }
+  if (macroRegime?.riskLevel === 'HIGH') {
+    riskWarnings.push('Macro regime is HIGH risk; volatile headline shocks may impact all sectors simultaneously.');
+  }
+  if (top && top.allocation >= 8) {
+    riskWarnings.push(`Top holding ${top.ticker} has high allocation; monitor single-name risk.`);
+  }
+
+  return {
+    executiveSummary,
+    sectorRotationInsight,
+    diversificationAssessment,
+    recommendations,
+    riskWarnings,
+  };
+}
+
 async function runPortfolioOptimization({ tickers, useMarketData = [], timeHorizon = 'MEDIUM' }, dependencies = {}) {
   // Validate input
   if (!Array.isArray(tickers) || tickers.length === 0) {
@@ -404,20 +515,24 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   if (useMarketData && Array.isArray(useMarketData) && useMarketData.length === tickers.length) {
     marketDataArray = useMarketData;
   } else {
-    // Fetch market data for each ticker in parallel
-    const llm = dependencies.callDeepSeek || callDeepSeek;
+    // Fetch market data for each ticker sequentially to avoid Alpha Vantage free-tier burst limits.
     try {
-      const promises = tickers.map(ticker => 
-        runMarketIntelligence({ ticker }, { callDeepSeek: llm })
-          .then(result => result.marketData)
-          .catch(error => {
-            console.error(`Failed to fetch market data for ${ticker}:`, error.message);
-            return null;
-          })
-      );
-      
-      const results = await Promise.all(promises);
-      marketDataArray = results.filter(md => md !== null);
+      const shouldThrottleAlpha = !!config.alphaVantageApiKey && config.alphaVantageApiKey !== 'demo';
+      for (let index = 0; index < tickers.length; index += 1) {
+        const ticker = tickers[index];
+        try {
+          const result = await runMarketIntelligence({ ticker });
+          if (result?.marketData) {
+            marketDataArray.push(result.marketData);
+          }
+        } catch (error) {
+          console.error(`Failed to fetch market data for ${ticker}:`, error.message);
+        }
+
+        if (shouldThrottleAlpha && index < tickers.length - 1) {
+          await sleep(1100);
+        }
+      }
     } catch (error) {
       throw new Error(`Failed to fetch market data: ${error.message}`);
     }
@@ -426,6 +541,8 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   if (marketDataArray.length === 0) {
     throw new Error('No valid market data could be retrieved for any ticker');
   }
+
+  const dataSources = summarizeDataSources(marketDataArray);
 
   const macroRegime = computeMacroRegime(marketDataArray);
   
@@ -502,43 +619,23 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   
   // Estimate portfolio metrics
   const expectedReturn = rankedTickers.reduce((sum, rt) => sum + (rt.upside * rt.allocation / 100), 0);
-  const avgTicker = { rsi: rankedTickers.reduce((sum, rt) => sum + safeNumber(rt.rsi), 0) / rankedTickers.length };
-  
-  // LLM narrative
-  const llm = dependencies.callDeepSeek || callDeepSeek;
-  const systemPrompt = `You are a quantitative portfolio analyst. You have access to the following skill specification:\n\n${skills['portfolio-optimization']}\n\nGenerate a professional portfolio analysis narrative.`;
-  const userMessage = `Analyze this portfolio: ${JSON.stringify({
-    rankedTickers: rankedTickers.slice(0, 10),
-    sectorAnalysis: sectorAnalysis.slice(0, 5),
+  let portfolioNarrative = buildRuleBasedPortfolioNarrative({
+    rankedTickers,
+    sectorAnalysis,
     diversificationMetrics,
     macroRegime,
     expectedReturn,
-  }, null, 2)}. Return JSON with: executiveSummary, sectorRotationInsight, diversificationAssessment, recommendations (array), riskWarnings (array).`;
-  
-  let llmNarrative = {
-    executiveSummary: 'Portfolio analysis complete.',
-    sectorRotationInsight: sectorAnalysis[0] ? `${sectorAnalysis[0].sector} is the strongest sector.` : 'Sector rotation analysis pending.',
-    diversificationAssessment: 'Portfolio diversification assessed.',
-    recommendations: ['Review concentration risk', 'Consider rebalancing by sector'],
-    riskWarnings: diversificationMetrics.avgPairwiseCorrelation > 0.7 ? ['High correlation: portfolio may move in tandem'] : [],
-  };
-  
-  try {
-    const analysis = await llm(systemPrompt, userMessage);
-    llmNarrative = parseJsonResponse(analysis, llmNarrative);
-  } catch (error) {
-    console.error('LLM narrative failed:', error.message);
-  }
+  });
 
   if (macroRegime.available) {
     const macroText = `Macro regime: ${macroRegime.riskLevel} risk (${macroRegime.sentimentLabel}, ${macroRegime.sentimentScore}).`;
-    llmNarrative.executiveSummary = llmNarrative.executiveSummary
-      ? `${llmNarrative.executiveSummary} ${macroText}`
+    portfolioNarrative.executiveSummary = portfolioNarrative.executiveSummary
+      ? `${portfolioNarrative.executiveSummary} ${macroText}`
       : macroText;
   }
   if (macroRegime.riskLevel === 'HIGH') {
-    llmNarrative.recommendations = Array.from(new Set([...(llmNarrative.recommendations || []), 'Increase cash buffer and reduce high-beta concentration while macro risk remains elevated.']));
-    llmNarrative.riskWarnings = Array.from(new Set([...(llmNarrative.riskWarnings || []), 'Macro risk regime is HIGH; drawdown probability is elevated across correlated risk assets.']));
+    portfolioNarrative.recommendations = Array.from(new Set([...(portfolioNarrative.recommendations || []), 'Increase cash buffer and reduce high-beta concentration while macro risk remains elevated.']));
+    portfolioNarrative.riskWarnings = Array.from(new Set([...(portfolioNarrative.riskWarnings || []), 'Macro risk regime is HIGH; drawdown probability is elevated across correlated risk assets.']));
   }
   
   return {
@@ -546,6 +643,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
     correlationMatrix,
     sectorAnalysis,
     diversificationMetrics,
+    dataSources,
     macroRegime,
     portfolioMetrics: {
       totalAllocation: totalAllocation,
@@ -554,7 +652,8 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
       expectedVolatility: 0, // Simplified; would require std computation
       sharpeRatio: 0, // Simplified
     },
-    llmNarrative,
+    portfolioNarrative,
+    llmNarrative: portfolioNarrative,
     skillUsed: 'portfolio-optimization',
     analysisDate: new Date().toISOString(),
     timeHorizon,

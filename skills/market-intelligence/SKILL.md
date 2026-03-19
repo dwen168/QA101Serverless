@@ -4,7 +4,8 @@ description: >
   Collects and synthesizes real-time market intelligence for a given stock ticker.
   Validates the ticker, retrieves price data and technical indicators (MA, RSI),
   fetches recent news headlines with sentiment scores, and aggregates analyst
-  consensus ratings into a structured MarketIntelligenceReport.
+  consensus ratings into a structured MarketIntelligenceReport with a rule-based
+  market summary.
 metadata:
   version: "1.0.0"
   author: QuantBot
@@ -42,6 +43,7 @@ Collect the following price metrics (live or from mock generator):
 - **Market cap**, P/E ratio, EPS
 - **Volume** (today) and **average volume** (30-day)
 - **30-day OHLCV history** (date, open, high, low, close, volume for each day)
+- Apply a configurable timeout to live data requests; if live data fails or times out, fall back to mock data and record the fallback reason
 
 ### Step 3 — Compute Technical Indicators
 Using the 30-day price history:
@@ -66,6 +68,7 @@ Using the 30-day price history:
 ### Step 4 — Retrieve News & Sentiment
 - Collect 5 recent headlines relevant to the ticker.
 - For each headline, record: title, source, sentiment score (−1.0 to +1.0), hoursAgo.
+- Score headline sentiment with rule-based keyword logic; do not call an LLM for headline scoring.
 - Aggregate sentiment into a single `sentimentScore` (average of headline scores).
 - Classify `sentimentLabel`: BULLISH (> 0.3), BEARISH (< −0.3), or NEUTRAL.
 
@@ -80,12 +83,14 @@ Aggregate analyst ratings:
 - Price targets: targetHigh, targetLow, targetMean
 - Upside % = (targetMean − currentPrice) / currentPrice × 100
 
-### Step 6 — Synthesize Report (LLM)
+### Step 6 — Synthesize Report (Rule-Based)
 Using all data collected above, produce a JSON `llmAnalysis` object with:
 - `summary` — 2–3 sentences describing the current market situation
 - `keyTrends` — array of 3 concise trend observations
 - `riskFlags` — array of risk factors (may be empty)
 - `marketContext` — 1 sentence on the broader macro/sector context
+
+The output key remains `llmAnalysis` for response compatibility, but the content is generated deterministically rather than by an LLM.
 
 ## Output Schema
 ```json
@@ -170,6 +175,8 @@ Using all data collected above, produce a JSON `llmAnalysis` object with:
       },
       "calculatedAt": "2026-03-17T12:00:00.000Z"
     },
+    "dataSource": "alpha-vantage",
+    "fallbackReason": null,
     "collectedAt": "2026-03-17T12:00:00.000Z"
   },
   "llmAnalysis": {
@@ -178,7 +185,10 @@ Using all data collected above, produce a JSON `llmAnalysis` object with:
     "riskFlags": [],
     "marketContext": "..."
   },
-  "skillUsed": "market-intelligence"
+  "skillUsed": "market-intelligence",
+  "dataSource": "alpha-vantage",
+  "usedFallback": false,
+  "fallbackReason": null
 }
 ```
 

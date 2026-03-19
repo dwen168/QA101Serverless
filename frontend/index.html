@@ -47,6 +47,32 @@
   .logo-text { font-size: 15px; font-weight: 600; letter-spacing: -0.3px; }
   .logo-text span { color: var(--cyan); }
   .header-right { display: flex; align-items: center; gap: 16px; }
+  .llm-switcher {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border2);
+    background: linear-gradient(180deg, rgba(17,27,46,0.96), rgba(13,20,36,0.92));
+  }
+  .llm-switcher-label {
+    font-size: 10px; font-family: var(--mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .llm-provider-select, .llm-model-input {
+    height: 32px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--bg3); color: var(--text); font-size: 11px;
+    font-family: var(--mono); outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .llm-provider-select {
+    padding: 0 10px; min-width: 92px; cursor: pointer;
+  }
+  .llm-model-input {
+    width: 156px; padding: 0 12px;
+  }
+  .llm-provider-select:focus, .llm-model-input:focus {
+    border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,212,255,0.12);
+  }
+  .llm-status {
+    min-width: 126px; font-size: 10px; font-family: var(--mono); color: var(--cyan);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .skill-pills { display: flex; gap: 6px; }
   .skill-pill {
     font-size: 11px; font-weight: 500; font-family: var(--mono);
@@ -127,7 +153,15 @@
     justify-content: center; transition: opacity 0.2s; flex-shrink: 0;
   }
   .send-btn:hover { opacity: 0.85; }
+  .send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
   .send-btn svg { width: 16px; height: 16px; fill: var(--bg); }
+  .stop-btn {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+  }
+  .stop-btn svg { fill: var(--text2); }
+  .stop-btn:not(:disabled):hover { border-color: var(--amber); }
+  .stop-btn:not(:disabled):hover svg { fill: var(--amber); }
   .quick-btns { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
   .quick-btn {
     font-size: 11px; font-family: var(--mono); padding: 4px 10px;
@@ -287,6 +321,25 @@
   .section-divider { display: flex; align-items: center; gap: 8px; }
   .section-divider-line { flex: 1; height: 1px; background: var(--border); }
   .section-divider-text { font-size: 10px; font-family: var(--mono); color: var(--text3); text-transform: uppercase; letter-spacing: 0.1em; }
+
+  @media (max-width: 1380px) {
+    header { height: auto; padding: 12px 16px; align-items: flex-start; gap: 12px; }
+    .header-right { flex-wrap: wrap; justify-content: flex-end; }
+    .llm-switcher { order: -1; }
+  }
+
+  @media (max-width: 1120px) {
+    .skill-pills { display: none; }
+  }
+
+  @media (max-width: 900px) {
+    .main { flex-direction: column; }
+    .chat-panel { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+    .analysis-panel { padding: 16px; }
+    .llm-switcher { width: 100%; flex-wrap: wrap; border-radius: var(--radius-sm); }
+    .llm-model-input { flex: 1; width: auto; min-width: 180px; }
+    .llm-status { width: 100%; min-width: 0; }
+  }
 </style>
 </head>
 <body>
@@ -299,6 +352,15 @@
     <span class="logo-text">Quant<span>Bot</span></span>
   </div>
   <div class="header-right">
+    <div class="llm-switcher">
+      <span class="llm-switcher-label">LLM</span>
+      <select id="llm-provider" class="llm-provider-select" onchange="handleLlmProviderChange()">
+        <option value="deepseek">DeepSeek</option>
+        <option value="ollama">Ollama</option>
+      </select>
+      <select id="llm-model" class="llm-model-input" onchange="handleLlmModelChange()"></select>
+      <span class="llm-status" id="llm-status">loading...</span>
+    </div>
     <div class="skill-pills">
       <span class="skill-pill" id="pill-1">① market-intelligence</span>
       <span class="skill-pill" id="pill-2">② eda-visual-analysis</span>
@@ -359,6 +421,9 @@
         <button class="send-btn" onclick="sendMessage()">
           <svg viewBox="0 0 16 16"><path d="M1 8L15 1 8 15 7 9z"/></svg>
         </button>
+        <button class="send-btn stop-btn" id="stop-btn" onclick="cancelCurrentRequest()" disabled title="Stop current request">
+          <svg viewBox="0 0 16 16"><path d="M4 4h8v8H4z"/></svg>
+        </button>
       </div>
     </div>
   </div>
@@ -375,11 +440,161 @@
 
 <script>
 const API_BASE = 'http://localhost:3001/api';
+const DEFAULT_MODELS = {
+  deepseek: 'deepseek-chat',
+  ollama: 'qwen3.5:9b',
+};
+const MODEL_PRESETS = {
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  ollama: [],
+};
+const STORAGE_KEYS = {
+  provider: 'quantbot.llm.provider',
+  model: 'quantbot.llm.model',
+};
 let chatHistory = [];
 let currentCharts = {};
+let currentRequestController = null;
+let isProcessingRequest = false;
+let llmConfig = {
+  provider: 'deepseek',
+  model: DEFAULT_MODELS.deepseek,
+};
+let llmModelCache = {
+  deepseek: [...MODEL_PRESETS.deepseek],
+  ollama: [...MODEL_PRESETS.ollama],
+};
+
+function getLlmHeaders(includeJson = true) {
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  headers['x-llm-provider'] = llmConfig.provider;
+  if (String(llmConfig.model || '').trim()) {
+    headers['x-llm-model'] = String(llmConfig.model).trim();
+  }
+  return headers;
+}
+
+function saveLlmConfig() {
+  localStorage.setItem(STORAGE_KEYS.provider, llmConfig.provider);
+  localStorage.setItem(STORAGE_KEYS.model, llmConfig.model);
+}
+
+function updateLlmControls() {
+  const providerEl = document.getElementById('llm-provider');
+  const modelEl = document.getElementById('llm-model');
+  const statusEl = document.getElementById('llm-status');
+
+  if (providerEl) providerEl.value = llmConfig.provider;
+  updateModelOptions(llmConfig.provider);
+  if (modelEl) modelEl.value = llmConfig.model;
+  if (statusEl) statusEl.textContent = `${llmConfig.provider} · ${llmConfig.model}`;
+}
+
+function updateModelOptions(provider) {
+  const modelSelect = document.getElementById('llm-model');
+  if (!modelSelect) return;
+
+  let options = [];
+  if (provider === 'ollama') {
+    options = Array.from(new Set((llmModelCache.ollama || []).filter(Boolean)));
+    if (options.length === 0 && llmConfig.provider === 'ollama' && llmConfig.model) {
+      options = [llmConfig.model];
+    }
+  } else {
+    options = Array.from(new Set([
+      ...(llmModelCache.deepseek || []),
+      llmConfig.model,
+    ].filter(Boolean)));
+  }
+
+  if (options.length === 0) {
+    options = [DEFAULT_MODELS[provider]];
+  }
+
+  modelSelect.innerHTML = options
+    .map((model) => `<option value="${model}">${model}</option>`)
+    .join('');
+}
+
+function applyLlmConfig(provider, model) {
+  const resolvedProvider = provider === 'ollama' ? 'ollama' : 'deepseek';
+  const resolvedModel = String(model || '').trim() || DEFAULT_MODELS[resolvedProvider];
+
+  llmModelCache[resolvedProvider] = Array.from(new Set([
+    ...(llmModelCache[resolvedProvider] || []),
+    resolvedModel,
+  ]));
+
+  llmConfig = {
+    provider: resolvedProvider,
+    model: resolvedModel,
+  };
+  updateLlmControls();
+  saveLlmConfig();
+}
+
+async function refreshModelsForProvider(provider) {
+  try {
+    const response = await fetch(`${API_BASE}/llm/models?provider=${encodeURIComponent(provider)}`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    const models = Array.isArray(payload?.models)
+      ? payload.models.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    if (models.length > 0) {
+      llmModelCache[provider] = Array.from(new Set([...(llmModelCache[provider] || []), ...models]));
+    }
+  } catch {
+    // Use local presets only when backend model list is unavailable.
+  }
+}
+
+async function handleLlmProviderChange() {
+  const providerEl = document.getElementById('llm-provider');
+  const nextProvider = providerEl?.value === 'ollama' ? 'ollama' : 'deepseek';
+  await refreshModelsForProvider(nextProvider);
+  const candidates = llmModelCache[nextProvider] || [];
+  const nextModel = candidates[0]
+    || (nextProvider === 'ollama' ? llmConfig.model : DEFAULT_MODELS[nextProvider]);
+  applyLlmConfig(nextProvider, nextModel);
+}
+
+function handleLlmModelChange() {
+  const provider = document.getElementById('llm-provider')?.value === 'ollama' ? 'ollama' : 'deepseek';
+  const model = document.getElementById('llm-model')?.value;
+  applyLlmConfig(provider, model);
+}
+
+async function initializeLlmConfig() {
+  const savedProvider = localStorage.getItem(STORAGE_KEYS.provider);
+  const savedModel = localStorage.getItem(STORAGE_KEYS.model);
+
+  if (savedProvider || savedModel) {
+    await refreshModelsForProvider(savedProvider === 'ollama' ? 'ollama' : 'deepseek');
+    applyLlmConfig(savedProvider, savedModel);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/health`);
+    const data = await res.json();
+    await refreshModelsForProvider(data.llm?.provider === 'ollama' ? 'ollama' : 'deepseek');
+    applyLlmConfig(data.llm?.provider, data.llm?.model);
+  } catch {
+    await refreshModelsForProvider('deepseek');
+    applyLlmConfig('deepseek', DEFAULT_MODELS.deepseek);
+  }
+}
 
 function formatTime() {
   return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDurationMs(ms) {
+  const value = Number(ms) || 0;
+  if (value < 1000) return `${Math.max(1, Math.round(value))}ms`;
+  return `${(value / 1000).toFixed(2)}s`;
 }
 
 function addMessage(role, content, skillBadge = null) {
@@ -409,6 +624,44 @@ function addLoadingMsg(text) {
 function removeLoadingMsg() {
   const el = document.getElementById('loading-msg');
   if (el) el.remove();
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('aborted');
+}
+
+function updateStopButtonState() {
+  const stopBtn = document.getElementById('stop-btn');
+  if (stopBtn) stopBtn.disabled = !isProcessingRequest;
+}
+
+function beginRequestSession() {
+  if (currentRequestController) {
+    currentRequestController.abort();
+  }
+  currentRequestController = new AbortController();
+  isProcessingRequest = true;
+  updateStopButtonState();
+}
+
+function endRequestSession() {
+  isProcessingRequest = false;
+  currentRequestController = null;
+  updateStopButtonState();
+}
+
+function cancelCurrentRequest() {
+  if (!currentRequestController) return;
+  currentRequestController.abort();
+  removeLoadingMsg();
+  resetPills();
+  addMessage('bot', '⏹ Current request cancelled.');
+  endRequestSession();
+}
+
+async function apiFetch(url, options = {}) {
+  const signal = options.signal || currentRequestController?.signal;
+  return fetch(url, { ...options, signal });
 }
 
 function setPillState(n, state) {
@@ -453,11 +706,12 @@ async function quickBacktest(ticker) {
 async function processMessage(text) {
   const loadEl = addLoadingMsg('Thinking...');
   resetPills();
+  beginRequestSession();
 
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
+    const res = await apiFetch(`${API_BASE}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getLlmHeaders(),
       body: JSON.stringify({ message: text, history: chatHistory.slice(-6) }),
     });
     const data = await res.json();
@@ -486,6 +740,9 @@ async function processMessage(text) {
       chatHistory.push({ role: 'assistant', content: data.message });
     }
   } catch (err) {
+    if (isAbortError(err)) {
+      return;
+    }
     removeLoadingMsg();
     // Fallback: detect ticker in text
     const match = text.toUpperCase().match(/\b([A-Z]{2,5})\b/);
@@ -495,10 +752,13 @@ async function processMessage(text) {
     } else {
       addMessage('bot', `Ask me to analyze a stock! e.g. "Analyze AAPL"`);
     }
+  } finally {
+    endRequestSession();
   }
 }
 
 async function runSkillPipeline(ticker) {
+  const pipelineStartedAt = performance.now();
   // Clear previous analysis
   const panel = document.getElementById('analysis-panel');
   panel.innerHTML = '';
@@ -510,8 +770,9 @@ async function runSkillPipeline(ticker) {
 
   let marketData, llmAnalysis, dataSource, usedFallback, fallbackReason;
   try {
-    const r1 = await fetch(`${API_BASE}/skills/market-intelligence`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const skillStartedAt = performance.now();
+    const r1 = await apiFetch(`${API_BASE}/skills/market-intelligence`, {
+      method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ ticker }),
     });
     const d1 = await r1.json();
@@ -522,9 +783,10 @@ async function runSkillPipeline(ticker) {
     fallbackReason = d1.fallbackReason;
     setPillState(1, 'done');
     removeLoadingMsg();
-    addMessage('bot', `✓ Market intelligence collected for <strong>${ticker}</strong>`, { cls: 's1', label: '① market-intelligence' });
+    addMessage('bot', `✓ Market intelligence collected for <strong>${ticker}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's1', label: '① market-intelligence' });
     renderMarketIntelligence(marketData, llmAnalysis, panel, dataSource, usedFallback, fallbackReason);
   } catch (err) {
+    if (isAbortError(err)) return;
     setPillState(1, '');
     removeLoadingMsg();
     addMessage('bot', `Could not reach the backend. Make sure the server is running on port 3001.`);
@@ -537,8 +799,9 @@ async function runSkillPipeline(ticker) {
 
   let charts, edaInsights;
   try {
-    const r2 = await fetch(`${API_BASE}/skills/eda-visual-analysis`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const skillStartedAt = performance.now();
+    const r2 = await apiFetch(`${API_BASE}/skills/eda-visual-analysis`, {
+      method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ marketData }),
     });
     const d2 = await r2.json();
@@ -546,9 +809,10 @@ async function runSkillPipeline(ticker) {
     edaInsights = d2.edaInsights;
     setPillState(2, 'done');
     removeLoadingMsg();
-    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found`, { cls: 's2', label: '② eda-visual-analysis' });
+    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's2', label: '② eda-visual-analysis' });
     renderEDA(charts, edaInsights, marketData, panel);
   } catch (err) {
+    if (isAbortError(err)) return;
     setPillState(2, '');
     removeLoadingMsg();
     addMessage('bot', `EDA analysis failed.`);
@@ -559,17 +823,20 @@ async function runSkillPipeline(ticker) {
   const l3 = addLoadingMsg('⟳ Running trade-recommendation skill...');
 
   try {
-    const r3 = await fetch(`${API_BASE}/skills/trade-recommendation`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const skillStartedAt = performance.now();
+    const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
+      method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ marketData, edaInsights }),
     });
     const d3 = await r3.json();
     setPillState(3, 'done');
     removeLoadingMsg();
     const rec = d3.recommendation;
-    addMessage('bot', `✓ <strong style="color:${rec.actionColor}">${rec.action}</strong> — ${rec.confidence}% confidence`, { cls: 's3', label: '③ trade-recommendation' });
+    addMessage('bot', `✓ <strong style="color:${rec.actionColor}">${rec.action}</strong> — ${rec.confidence}% confidence <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's3', label: '③ trade-recommendation' });
     renderRecommendation(rec, panel);
+    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
   } catch (err) {
+    if (isAbortError(err)) return;
     setPillState(3, '');
     removeLoadingMsg();
     addMessage('bot', `Recommendation engine failed.`);
@@ -577,6 +844,7 @@ async function runSkillPipeline(ticker) {
 }
 
 async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
+  const pipelineStartedAt = performance.now();
   const panel = document.getElementById('analysis-panel');
   panel.innerHTML = '';
   destroyCharts();
@@ -584,9 +852,10 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
 
   const loading = addLoadingMsg('⟳ Running portfolio-optimization skill...');
   try {
-    const r = await fetch(`${API_BASE}/skills/portfolio-optimization`, {
+    const skillStartedAt = performance.now();
+    const r = await apiFetch(`${API_BASE}/skills/portfolio-optimization`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getLlmHeaders(),
       body: JSON.stringify({ tickers, timeHorizon }),
     });
     const d = await r.json();
@@ -599,17 +868,20 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
 
     addMessage(
       'bot',
-      `✓ Portfolio optimization complete for <strong>${tickers.join(', ')}</strong>`,
+      `✓ Portfolio optimization complete for <strong>${tickers.join(', ')}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`,
       { cls: 's2', label: 'portfolio-optimization' }
     );
+    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
     renderPortfolioOptimization(d, panel);
   } catch (err) {
+    if (isAbortError(err)) return;
     removeLoadingMsg();
     addMessage('bot', 'Could not run portfolio optimization. Make sure backend is running on port 3001.');
   }
 }
 
 async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 'trade-recommendation') {
+  const pipelineStartedAt = performance.now();
   const panel = document.getElementById('analysis-panel');
   panel.innerHTML = '';
   destroyCharts();
@@ -618,9 +890,10 @@ async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 't
   setPillState(4, 'active');
   const loading = addLoadingMsg('⟳ Running backtesting skill...');
   try {
-    const r = await fetch(`${API_BASE}/skills/backtesting`, {
+    const skillStartedAt = performance.now();
+    const r = await apiFetch(`${API_BASE}/skills/backtesting`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getLlmHeaders(),
       body: JSON.stringify({ ticker, startDate, endDate, strategyName, initialCapital: 100000 }),
     });
     const d = await r.json();
@@ -633,9 +906,11 @@ async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 't
     }
 
     setPillState(4, 'done');
-    addMessage('bot', `✓ Backtest complete for <strong>${ticker}</strong>`, { cls: 's2', label: '④ backtesting' });
+    addMessage('bot', `✓ Backtest complete for <strong>${ticker}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's2', label: '④ backtesting' });
+    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
     renderBacktestReport(d.backtestReport, panel);
   } catch (err) {
+    if (isAbortError(err)) return;
     setPillState(4, '');
     removeLoadingMsg();
     addMessage('bot', 'Could not run backtest. Make sure backend is running and API keys are configured.');
@@ -647,13 +922,50 @@ function renderPortfolioOptimization(result, panel) {
   const ranked = result.rankedTickers || [];
   const sectors = result.sectorAnalysis || [];
   const div = result.diversificationMetrics || {};
-  const narrative = result.llmNarrative || {};
+  const narrative = result.portfolioNarrative || result.llmNarrative || {};
   const macro = result.macroRegime || {};
+  const dataSources = result.dataSources || {};
 
   const section = document.createElement('div');
   section.className = 'section-divider fade-in';
   section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">portfolio-optimization</span><div class="section-divider-line"></div>`;
   panel.appendChild(section);
+
+  const sourceStatus = String(dataSources.status || '').toUpperCase();
+  if (sourceStatus) {
+    const sourceCard = document.createElement('div');
+    sourceCard.className = 'fade-in';
+
+    const isLive = sourceStatus === 'LIVE';
+    const isMock = sourceStatus === 'MOCK';
+    const background = isLive
+      ? 'rgba(16,232,152,0.1)'
+      : isMock
+        ? 'rgba(245,166,35,0.1)'
+        : 'rgba(0,212,255,0.1)';
+    const border = isLive
+      ? 'rgba(16,232,152,0.25)'
+      : isMock
+        ? 'rgba(245,166,35,0.25)'
+        : 'rgba(0,212,255,0.25)';
+    const color = isLive ? 'var(--green)' : isMock ? 'var(--amber)' : 'var(--cyan)';
+
+    sourceCard.style.cssText = `background:${background};border:1px solid ${border};border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;gap:8px`;
+    sourceCard.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div style="font-size:12px;font-weight:500;color:${color}">Data Source: ${sourceStatus}</div>
+        <div style="font-size:10px;font-family:var(--mono);color:var(--text3)">live ${dataSources.sourceBreakdown?.live || 0} · mock ${dataSources.sourceBreakdown?.mock || 0} · unknown ${dataSources.sourceBreakdown?.unknown || 0}</div>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">${dataSources.message || ''}</div>
+      ${(dataSources.details || []).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${dataSources.details.map((item) => {
+        const itemColor = item.usedFallback ? 'var(--amber)' : (item.source === 'alpha-vantage' || item.source === 'yahoo-finance') ? 'var(--green)' : 'var(--text2)';
+        const reasonText = item.fallbackReason ? ` · ${item.fallbackReason}` : '';
+        return `<span class="detail-chip" style="border-color:rgba(0,212,255,0.2);color:${itemColor}">${item.ticker}: ${item.source}${reasonText}</span>`;
+      }).join('')}</div>` : ''}
+    `;
+
+    panel.appendChild(sourceCard);
+  }
 
   const summary = document.createElement('div');
   summary.className = 'card fade-in';
@@ -746,11 +1058,36 @@ function renderBacktestReport(report, panel) {
   const trades = report.tradeLog || [];
   const drawdown = report.drawdownAnalysis || {};
   const risk = report.riskAnalysis || {};
+  const dataSource = String(report.dataSource || '').toLowerCase();
 
   const section = document.createElement('div');
   section.className = 'section-divider fade-in';
   section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">④ backtesting</span><div class="section-divider-line"></div>`;
   panel.appendChild(section);
+
+  const sourceCard = document.createElement('div');
+  sourceCard.className = 'fade-in';
+  const isLive = dataSource === 'alpha-vantage' || dataSource === 'yahoo-finance';
+  const isUnavailable = dataSource === 'unavailable' || !dataSource;
+  const statusLabel = isLive ? 'LIVE' : isUnavailable ? 'UNAVAILABLE' : 'MIXED';
+  const sourceLabel = dataSource || 'unknown';
+  const color = isLive ? 'var(--green)' : isUnavailable ? 'var(--amber)' : 'var(--cyan)';
+  const bg = isLive
+    ? 'rgba(16,232,152,0.1)'
+    : isUnavailable
+      ? 'rgba(245,166,35,0.1)'
+      : 'rgba(0,212,255,0.1)';
+  const border = isLive
+    ? 'rgba(16,232,152,0.25)'
+    : isUnavailable
+      ? 'rgba(245,166,35,0.25)'
+      : 'rgba(0,212,255,0.25)';
+  sourceCard.style.cssText = `background:${bg};border:1px solid ${border};border-radius:var(--radius);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px`;
+  sourceCard.innerHTML = `
+    <div style="font-size:12px;font-weight:500;color:${color}">Data Source: ${statusLabel}</div>
+    <div style="font-size:11px;color:var(--text2);font-family:var(--mono)">${sourceLabel}</div>
+  `;
+  panel.appendChild(sourceCard);
 
   const summary = document.createElement('div');
   summary.className = 'card fade-in';
@@ -1030,8 +1367,8 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     summary.className = 'card fade-in';
     summary.innerHTML = `
       <div class="card-header">
-        <span class="card-title">AI Summary</span>
-        <span class="card-skill s1" style="background:rgba(0,212,255,0.1);color:var(--cyan);padding:2px 7px;border-radius:4px;font-size:10px;font-family:var(--mono)">DeepSeek</span>
+        <span class="card-title">Market Summary</span>
+        <span class="card-skill s1" style="background:rgba(0,212,255,0.1);color:var(--cyan);padding:2px 7px;border-radius:4px;font-size:10px;font-family:var(--mono)">RULES</span>
       </div>
       <p style="font-size:13px;line-height:1.6;color:var(--text2);margin-bottom:10px">${llm.summary}</p>
       ${llm.keyTrends?.length ? `<div style="display:flex;flex-direction:column;gap:5px">${llm.keyTrends.map(t => `<div class="insight-item"><div class="insight-dot"></div>${t}</div>`).join('')}</div>` : ''}
@@ -1561,6 +1898,7 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
+initializeLlmConfig();
 document.addEventListener('click', closeExportMenu);
 </script>
 </body>

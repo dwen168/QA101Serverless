@@ -1,14 +1,18 @@
 # QuantBot — AI Quantitative Analysis Demo
 
-An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with five specialized skills: single-stock analysis, multi-stock portfolio optimization, and historical strategy backtesting.
+An agent-skills–based stock analysis chatbot powered by a selectable **DeepSeek or Ollama LLM** with five specialized skills: single-stock analysis, multi-stock portfolio optimization, and historical strategy backtesting.
 
 ## What's New in v2.1
 
 - Portfolio optimization can now be triggered directly from the UI chatbot with natural-language prompts such as `Optimize portfolio AAPL, MSFT, NVDA`.
 - Backtesting can now be triggered directly from the UI chatbot with prompts such as `Backtest AAPL from 2025-01-01 to 2026-03-18`.
+- The frontend now supports per-request LLM provider/model switching between DeepSeek and local Ollama.
+- Running requests can now be cancelled from the UI, and each completed skill shows its execution time.
+- Portfolio optimization and backtesting now surface whether results came from live APIs, mock fallback data, or a mixed source set.
 - Market intelligence now includes a macro/geopolitical context layer, so global headlines such as wars, Fed tone, tariffs, and oil shocks can be surfaced alongside ticker-specific news.
 - Trade recommendation now uses the macro regime as a scoring overlay, affecting signal totals, confidence, and key risk flags.
 - Portfolio optimization now applies macro-regime tilts to ranking and allocations, including defensive cash-bias in high-risk regimes.
+- Market intelligence headline sentiment and portfolio narrative generation now use rule-based logic instead of LLM calls, reducing token usage and improving stability on local models.
 - News cards now show richer article context with summaries and source links instead of headline-only display.
 - News summaries are collapsible, so the analysis panel stays compact while keeping source detail available on demand.
 - MACD signal-line calculation now uses the standard EMA-based MACD(12,26,9) method.
@@ -50,7 +54,7 @@ QA101/
 │   └── lib/
 │       ├── chat.js               # Chat orchestration
 │       ├── config.js             # Env/config loader
-│       ├── llm.js                # DeepSeek client wrapper
+│       ├── llm.js                # Shared DeepSeek/Ollama client wrapper
 │       ├── pipeline.js           # End-to-end analysis pipeline
 │       ├── skill-loader.js       # Loads SKILL.md definitions
 │       └── utils.js              # Shared helpers
@@ -82,15 +86,46 @@ npm run mcp
 
 Then open: http://localhost:3001/
 
-### 1. Configure API keys
+The frontend header now includes an LLM switcher, so you can choose `DeepSeek` or `Ollama` and adjust the model name from the browser without restarting the server.
+The chat composer also includes a Stop button that aborts the current request, while completed skills report their elapsed runtime in the chat log.
+
+### 1. Configure API keys and LLM provider
 Edit `.env`:
 ```env
+LLM_PROVIDER=deepseek
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:9b
+REAL_DATA_TIMEOUT_MS=10000
+LLM_TIMEOUT_MS=60000
 ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
 FINNHUB_API_KEY=your_finnhub_api_key_here
 NEWS_API_KEY=your_newsapi_api_key_here
 PORT=3001
+```
+
+Provider options:
+- `LLM_PROVIDER=deepseek`: uses the DeepSeek API and requires `DEEPSEEK_API_KEY`
+- `LLM_PROVIDER=ollama`: uses your local Ollama instance at `OLLAMA_BASE_URL`
+
+Example for local Ollama with Qwen:
+```env
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3.5:9b
+```
+
+If you use the frontend switcher, the selected provider and model are sent per request and stored in browser local storage.
+
+Supporting runtime endpoints:
+- `GET /api/health` returns the active provider/model.
+- `GET /api/llm/models?provider=deepseek|ollama` returns selectable models for the current provider.
+
+Then pull the model if needed:
+```bash
+ollama pull qwen3.5:9b
 ```
 
 Get your API keys:
@@ -139,25 +174,28 @@ Each skill follows the [agentskills.io spec](https://agentskills.io/specificatio
 - Markdown body with step-by-step instructions
 - `references/` directory with supporting documentation
 
-The LLM (DeepSeek) receives each `SKILL.md` as part of its system prompt — this is how it "learns" what each skill does and how to execute it.
+The configured LLM provider (DeepSeek or Ollama) receives each `SKILL.md` as part of its system prompt — this is how it "learns" what each skill does and how to execute it.
 
 The executable skill logic lives directly in each skill folder under `scripts/`. Both the Express API and the MCP server import those script modules, so the skills remain reusable across transports while matching the agent skill folder pattern.
 
 ### Skill 1: market-intelligence
 - Validates ticker symbol
 - Fetches price data, moving averages, RSI from Alpha Vantage (live or mock fallback)
+- Applies configurable real-data timeouts via `REAL_DATA_TIMEOUT_MS`, then degrades gracefully to fallback data when needed
 - Calculates advanced technical indicators: **MACD, Bollinger Bands, KDJ, OBV, VWAP**
-- Retrieves news headlines from Finnhub with rule-based sentiment scoring (VADER-like)
+- Retrieves news headlines from Finnhub with rule-based sentiment scoring
 - Retrieves macro/geopolitical headlines and tags them into themes such as geopolitics, Fed or policy, tariffs, energy, and market stress
 - Aggregates analyst consensus ratings from Finnhub
 - Pulls real P/E, EPS, and market cap from Finnhub when available
+- Returns a rule-generated market summary compatible with the previous `llmAnalysis` response shape
 - Returns structured `MarketIntelligenceReport` with technical, fundamental, ticker-news, and macro-context data
 
 ### Skill 2: eda-visual-analysis
 - Accepts `MarketIntelligenceReport` as input
 - Computes MA10, MA20 from price history
 - Generates Chart.js configs for: price trend, volume, analyst donut, sentiment bars
-- Identifies key EDA patterns via LLM
+- Identifies key EDA patterns via the configured LLM provider
+- Receives compact macro context, top-news headlines, and technical indicators to synthesize final interpretation
 - Returns chart specs + textual insights
 
 ### Skill 3: trade-recommendation
@@ -172,12 +210,19 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 
 ### Skill 4: portfolio-optimization
 - Accepts array of tickers (e.g., 5–20 stocks)
+- Fetches ticker inputs sequentially to reduce Alpha Vantage free-tier rate-limit failures
 - Computes multi-factor scores: momentum, quality, risk-adjusted
 - Constructs correlation matrix and identifies diversification gaps
 - Groups stocks by sector and ranks sector rotation opportunities
 - Assigns portfolio actions (STRONG BUY → SELL) with recommended allocations
-- LLM generates portfolio thesis, sector rotation insight, and rebalancing recommendations
-- Returns ranked holdings, correlation matrix, and diversification metrics
+- Generates portfolio thesis, sector rotation insight, and rebalancing recommendations with rule-based logic
+- Returns ranked holdings, correlation matrix, diversification metrics, `portfolioNarrative`, and per-ticker data-source diagnostics
+- Response compatibility: legacy `llmNarrative` is still returned as an alias of `portfolioNarrative`
+
+### Skill 5: backtesting
+- Fetches historical data from Alpha Vantage or Yahoo Finance with configurable timeouts
+- Surfaces data-source status in the frontend so users can distinguish live historical data from fallback/unavailable states
+- Returns trade log, performance metrics, drawdown analysis, and risk summary
 
 ### Customization
 
@@ -242,12 +287,14 @@ touch skills/my-new-skill/SKILL.md
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/chat` | Main chatbot (DeepSeek routing) |
+| POST | `/api/chat` | Main chatbot (provider-aware LLM routing) |
 | POST | `/api/skills/market-intelligence` | Single-stock market analysis |
 | POST | `/api/skills/eda-visual-analysis` | Single-stock visual insights |
 | POST | `/api/skills/trade-recommendation` | Single-stock trade signal |
-| POST | `/api/skills/portfolio-optimization` | Multi-stock portfolio ranking & diversification |
+| POST | `/api/skills/portfolio-optimization` | Multi-stock portfolio ranking & diversification (`portfolioNarrative`, legacy `llmNarrative`) |
+| POST | `/api/skills/backtesting` | Historical strategy replay and performance metrics |
 | GET | `/api/health` | Health check |
+| GET | `/api/llm/models` | Model list for `deepseek` or `ollama` |
 
 ## MCP Tools
 

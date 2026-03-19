@@ -5,7 +5,8 @@ description: >
   sector rotation insights, and multi-factor scores to rank and recommend the
   optimal securities. Produces a ranked buy/hold/sell action list with diversification
   metrics and relative value comparison, with macro-regime overlays (geopolitical,
-  monetary-policy, and market-stress context) applied to scoring and allocations.
+  monetary-policy, and market-stress context) applied to scoring and allocations,
+  plus rule-based portfolio narrative generation and per-ticker data-source diagnostics.
 metadata:
   version: "1.0.0"
   author: QuantBot
@@ -45,8 +46,9 @@ Transform a basket of stocks into an actionable portfolio recommendation. Rank s
 ### Step 1 — Collect Stock Market Data
 Input: Array of tickers, optionally pre-computed MarketIntelligenceReport objects.
 - If `useMarketData` provided: validate and use existing data
-- Else: fetch market data for each ticker via market-intelligence skill (run in parallel)
+- Else: fetch market data for each ticker via market-intelligence skill sequentially to reduce Alpha Vantage free-tier rate-limit failures
 - Return early with error if any ticker fails validation or critical API calls fail
+- Preserve each ticker's `dataSource` and `fallbackReason` for downstream diagnostics
 
 ### Step 2 — Compute Multi-Factor Score for Each Stock
 
@@ -129,19 +131,25 @@ Compute:
 - **Sector concentration**: largest sector % of total allocation
 - **Idiosyncratic risk**: average pairwise correlation (lower is better)
 
-### Step 7 — LLM Narrative
-Send to LLM:
+### Step 6B — Data Source Diagnostics
+- Summarize how many tickers used live, mock, or unknown data sources
+- Return a portfolio-level `dataSources` object with `status`, `sourceBreakdown`, `details`, and a human-readable message
+
+### Step 7 — Rule-Based Narrative
+Generate deterministic portfolio commentary from:
 - Ranked ticker list + scores
 - Top sector opportunity + reason
 - Diversification summary
 - Risk warnings
 
-Request JSON output:
+Return JSON output:
 - `executiveSummary` — 1–2 sentences on portfolio thesis
 - `sectorRotationInsight` — Which sectors are rotating in/out and why
 - `diversificationAssessment` — Are we sufficiently diversified? Any concentration risks?
 - `recommendations` — Plain-English actionable steps (e.g., "Overweight tech momentum, underweight utilities")
 - `riskWarnings` — Array of portfolio-level risks (e.g., "High correlation to tech sector", "All picks are momentum-heavy")
+
+The primary output field is `portfolioNarrative`. A legacy compatibility alias `llmNarrative` should return the same object.
 
 ## Output Schema
 ```json
@@ -200,7 +208,17 @@ Request JSON output:
     "expectedVolatility": 18.2,
     "sharpeRatio": 0.69
   },
-  "llmNarrative": {
+  "dataSources": {
+    "status": "LIVE",
+    "allLive": true,
+    "hasMock": false,
+    "sourceBreakdown": { "live": 3, "mock": 0, "unknown": 0 },
+    "details": [
+      { "ticker": "NVDA", "source": "alpha-vantage", "usedFallback": false, "fallbackReason": null }
+    ],
+    "message": "Live market data used for all 3 tickers."
+  },
+  "portfolioNarrative": {
     "executiveSummary": "Portfolio is tilted toward semiconductor and AI momentum with moderate diversification. Recommend increasing exposure to non-correlated sectors for risk control.",
     "sectorRotationInsight": "Semiconductors and cloud infrastructure are rotating in; utilities and consumer staples remain weak.",
     "diversificationAssessment": "73% of allocation is tech-correlated. Consider adding financials, healthcare, or energy for cross-sector balance.",
@@ -215,6 +233,7 @@ Request JSON output:
       "Sector concentration risk: 73% in Technology"
     ]
   },
+  "llmNarrative": { "sameAs": "portfolioNarrative" },
   "skillUsed": "portfolio-optimization"
 }
 ```

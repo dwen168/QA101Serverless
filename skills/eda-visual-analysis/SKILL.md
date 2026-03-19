@@ -84,7 +84,10 @@ Y-axis range: −1 to +1
 
 ### Step 4 — LLM Analysis (EDA Insights)
 Send a prompt to the LLM containing the following market data summary:
-- Current price, RSI, Trend, Sentiment score, MA20, MA50
+- Current price, daily change %, RSI, Trend, Sentiment score/label, MA20, MA50, MA200
+- Macro risk level, macro sentiment tone, and a short macro market-context string
+- A compact list of top recent headlines with their precomputed sentiment scores
+- Technical indicator summary (MACD, Bollinger Bands, KDJ, OBV, VWAP, ATR/VaR when available)
 
 Request the LLM to return a JSON object:
 - `insights` — array of 4 key EDA observations (plain English, quantitative where possible)
@@ -92,12 +95,15 @@ Request the LLM to return a JSON object:
 - `technicalSummary` — 1–2 sentences synthesising the technical picture
 - `momentumSignal` — one of: POSITIVE, NEGATIVE, NEUTRAL
 
+The LLM response must be JSON only. If the provider returns extra prose or fenced code, normalize and parse the structured payload before using it.
+
 #### Fallback (if LLM unavailable)
 Compute insights deterministically:
 1. RSI zone analysis (`> 70` → overbought, `< 30` → oversold, else healthy range)
 2. Price deviation from MA50 (%)
 3. Sentiment label + score
 4. Analyst upside potential (%)
+5. Preserve locally computed `edaFactors` derived from breakout, volume regime, volatility regime, and trend-strength calculations
 
 ### Step 5 — Return Response
 ```json

@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 
 const config = require('./lib/config');
+const { getActiveModel, getActiveProvider, runWithLlmContext } = require('./lib/llm');
 const { loadSkills } = require('./lib/skill-loader');
 const { routeChatMessage } = require('./lib/chat');
 const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
@@ -16,6 +17,20 @@ const skills = loadSkills();
 
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  const providerHeader = String(req.get('x-llm-provider') || '').trim().toLowerCase();
+  const modelHeader = String(req.get('x-llm-model') || '').trim();
+
+  if (providerHeader && !['deepseek', 'ollama'].includes(providerHeader)) {
+    res.status(400).json({ error: 'x-llm-provider must be either deepseek or ollama' });
+    return;
+  }
+
+  runWithLlmContext(
+    { provider: providerHeader || null, model: modelHeader || null },
+    () => next()
+  );
+});
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 function handleRouteError(res, error, fallbackStatus = 500) {
@@ -99,7 +114,43 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     skills: Object.keys(skills),
     transports: ['http', 'mcp-stdio'],
+    llm: {
+      provider: getActiveProvider(),
+      model: getActiveModel(),
+    },
   });
+});
+
+app.get('/api/llm/models', async (req, res) => {
+  const provider = String(req.query.provider || '').trim().toLowerCase();
+
+  if (!provider || !['deepseek', 'ollama'].includes(provider)) {
+    res.status(400).json({ error: 'provider query must be deepseek or ollama' });
+    return;
+  }
+
+  if (provider === 'deepseek') {
+    res.json({ provider, models: [config.deepseekModel, 'deepseek-chat', 'deepseek-reasoner'] });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${config.ollamaBaseUrl}/api/tags`);
+    if (!response.ok) {
+      throw new Error(`Ollama tags request failed: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const models = Array.isArray(payload?.models)
+      ? payload.models
+          .map((entry) => String(entry?.name || '').trim())
+          .filter(Boolean)
+      : [];
+
+    res.json({ provider, models });
+  } catch (error) {
+    res.status(502).json({ error: `Failed to fetch Ollama models: ${error.message}` });
+  }
 });
 
 app.get('/', (req, res) => {
@@ -107,7 +158,14 @@ app.get('/', (req, res) => {
 });
 
 app.listen(config.port, () => {
+  const provider = getActiveProvider();
   console.log(`\nQuantBot API running on http://localhost:${config.port}`);
   console.log(`Skills loaded: ${Object.keys(skills).join(', ')}`);
-  console.log(`DeepSeek API: ${config.deepseekApiKey ? 'configured' : 'missing — add to .env'}\n`);
+  console.log(`LLM provider: ${provider} (${getActiveModel(provider)})`);
+  if (provider === 'ollama') {
+    console.log(`Ollama endpoint: ${config.ollamaBaseUrl}`);
+  } else {
+    console.log(`DeepSeek API: ${config.deepseekApiKey ? 'configured' : 'missing — add to .env'}`);
+  }
+  console.log('');
 });

@@ -18,6 +18,8 @@ const {
   calculateBollingerBands,
 } = require('../../../backend/lib/technical-indicators');
 const path = require('path');
+const config = require('../../../backend/lib/config');
+const REAL_DATA_TIMEOUT_MS = config.realDataTimeoutMs;
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
@@ -33,6 +35,22 @@ function getYahooFinance() {
     _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
   }
   return _yf;
+}
+
+async function withTimeout(promise, timeoutMs, label = 'operation') {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function fetchHistoricalDataFromAlphaVantage(ticker, apiKey) {
@@ -117,12 +135,34 @@ async function fetchHistoricalDataFromYahoo(ticker) {
 
 // Fetch historical data with fallback: Alpha Vantage -> Yahoo Finance
 async function fetchHistoricalData(ticker, apiKey) {
-  const alphaData = await fetchHistoricalDataFromAlphaVantage(ticker, apiKey);
+  let alphaData = null;
+  try {
+    alphaData = await withTimeout(
+      fetchHistoricalDataFromAlphaVantage(ticker, apiKey),
+      REAL_DATA_TIMEOUT_MS,
+      `Alpha Vantage fetch for ${ticker}`
+    );
+  } catch (error) {
+    console.error('[Backtest] Alpha timeout/fetch error:', error.message);
+    alphaData = null;
+  }
+
   if (alphaData && alphaData.length >= 50) {
     return { data: alphaData, source: 'alpha-vantage' };
   }
 
-  const yahooData = await fetchHistoricalDataFromYahoo(ticker);
+  let yahooData = null;
+  try {
+    yahooData = await withTimeout(
+      fetchHistoricalDataFromYahoo(ticker),
+      REAL_DATA_TIMEOUT_MS,
+      `Yahoo fetch for ${ticker}`
+    );
+  } catch (error) {
+    console.error('[Backtest] Yahoo timeout/fetch error:', error.message);
+    yahooData = null;
+  }
+
   if (yahooData && yahooData.length >= 50) {
     return { data: yahooData, source: 'yahoo-finance' };
   }

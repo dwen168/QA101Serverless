@@ -58,9 +58,11 @@ Identify whether your trading signal (e.g., trade-recommendation score) has **pr
 
 ### Step 1 — Fetch Historical Data
 Input: ticker, startDate, endDate (e.g., 2025-01-01 to 2026-03-18)
-- Fetch daily OHLCV data from Alpha Vantage
+- Fetch daily OHLCV data from Alpha Vantage, then Yahoo Finance as fallback
+- Apply configurable per-source timeouts so slow live requests do not block the backtest indefinitely
 - Store as array: [{ date, open, high, low, close, volume }, ...]
 - Minimum: 100 candles; optimal: 500+ days
+- Record the resolved `dataSource` used for the backtest report
 
 ### Step 2 — Generate Trading Signals
 For each day in the period, compute the signal using the specified strategy:
@@ -144,6 +146,7 @@ Generate detailed report:
   "backtestReport": {
     "ticker": "AAPL",
     "strategyName": "trade-recommendation",
+    "dataSource": "alpha-vantage",
     "period": {
       "startDate": "2025-01-01",
       "endDate": "2026-03-18",

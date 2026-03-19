@@ -2,15 +2,16 @@
 
 ## Current Architecture (Production Ready)
 
-The market-intelligence skill uses **real live data** with graceful fallback to mocks:
+The market-intelligence skill uses **live data with timeout-aware fallback behavior**:
 
 | Data Type | Primary Source | Fallback | Notes |
 |-----------|---|---|---|
-| **Price & Volume** | Alpha Vantage (`TIME_SERIES_DAILY_ADJUSTED`) | Mock | 25 req/day free; use `ALPHA_VANTAGE_API_KEY` |
-| **News & Sentiment** | Finnhub (`/company-news`) | Mock | 60 req/min free; local rule-based sentiment scoring |
+| **Price & Volume** | Alpha Vantage (`TIME_SERIES_DAILY`) | Yahoo Finance, then Mock | 25 req/day free; `REAL_DATA_TIMEOUT_MS` applies to live requests |
+| **News & Sentiment** | Finnhub (`/company-news`) | Yahoo Finance news, then Mock | 60 req/min free; local rule-based sentiment scoring |
 | **Analyst Consensus** | Finnhub (`/stock/recommendation/`) | Mock | Average of strongBuy, buy, hold, sell, strongSell counts |
 | **Price Targets** | Finnhub (`/stock/price-target`) | Mock | High, low, mean from recent analyst estimates |
 | **Fundamentals** | Finnhub (`/stock/profile2`, `/stock/metric`) | Mock | P/E, EPS, market cap, sector, industry |
+| **Macro / Geopolitical News** | Finnhub general news + NewsAPI | Empty macro feed | Used to build `macroContext` with dominant themes and risk level |
 | **Technical Indicators** | Local Computation | N/A | MACD, Bollinger Bands, KDJ, OBV, VWAP calculated from price history |
 
 ---
@@ -21,15 +22,15 @@ The market-intelligence skill uses **real live data** with graceful fallback to 
 
 | Provider | Free Tier | npm Package | Notes |
 |----------|-----------|-------------|-------|
-| **Alpha Vantage** ✅ *in use* | 25 req/day | — (use `axios`) | Env var: `ALPHA_VANTAGE_API_KEY` |
+| **Alpha Vantage** ✅ *in use* | 25 req/day | — (use `fetch`) | Env var: `ALPHA_VANTAGE_API_KEY` |
 | **Yahoo Finance 2** | Unlimited (unofficial) | `yahoo-finance2` | No API key needed |
 | **Polygon.io** | 5 req/min | — (use `axios`) | Requires registration |
 | **Finnhub** ✅ *in use* | 60 req/min | — (use `axios`) | News, analyst consensus, price targets, fundamentals |
 
 ### Alpha Vantage — Quick Integration
 ```js
-// Daily prices (TIME_SERIES_DAILY_ADJUSTED)
-const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${ticker}&apikey=${process.env.ALPHA_VANTAGE_API_KEY}`;
+// Daily prices (TIME_SERIES_DAILY)
+const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&apikey=${process.env.ALPHA_VANTAGE_API_KEY}`;
 const { data } = await axios.get(url);
 const timeSeries = data['Time Series (Daily)'];
 ```
@@ -73,13 +74,13 @@ const metricsRes = await axios.get(`https://finnhub.io/api/v1/stock/metric`, {
 ---
 
 ## Sentiment Scoring ✅ *currently implemented*
-Market-intelligence uses **local rule-based VADER sentiment scoring**:
-- Scans news headlines for 20+ positive keywords (+0.3 per occurrence) and negative keywords (−0.3 per occurrence)
-- No external API required; entirely local computation
+Market-intelligence uses **local rule-based headline scoring**:
+- Scans headlines for positive and negative finance/macro keywords
+- No external API or LLM required; entirely local computation
 - Score bounds: [−1.0, +1.0]
-- For future enhancement: Replace with **FinBERT** (Hugging Face `ProsusAI/finbert` fine-tuned for financial text)
+- Company news and macro news both use the same deterministic scoring path
 
-**Function:** `scoreHeadlineSentiment(headline)` in `skills/market-intelligence/scripts/index.js`
+**Functions:** `scoreHeadlineSentimentFallback(headline)` and `scoreSentimentsWithRules(headlines)` in `skills/market-intelligence/scripts/index.js`
 
 ---
 
@@ -102,7 +103,7 @@ All technical indicators are computed locally from price history (no external AP
 | Provider | Free Tier | Endpoint | Status |
 |----------|-----------|----------|--------|
 | **Finnhub News** ✅ | 60 req/min | `/company-news` | In use |
-| **NewsAPI** | 100 req/day | `https://newsapi.org/v2/everything` | Available (not yet wired) |
+| **NewsAPI** | 100 req/day | `https://newsapi.org/v2/everything` | In use for macro-news enrichment |
 | **Benzinga** | Paid | REST API | Not implemented |
 
 ### NewsAPI — Quick Integration (Optional)
@@ -117,3 +118,5 @@ const articles = newsRes.data.articles;
 ## Rate Limit Recommendations
 - Cache market data for ≥ 1 minute per ticker to avoid hitting free-tier limits.
 - Add an in-memory Map or Redis cache keyed on `${ticker}:${date}`.
+- Keep Alpha Vantage as a best-effort source; if it returns `Note` or `Information`, degrade to Yahoo Finance or mock data instead of failing the skill.
+- Apply short enrichment timeouts to optional news/fundamental calls so price retrieval does not get blocked by secondary endpoints.

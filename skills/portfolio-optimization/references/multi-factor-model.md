@@ -141,6 +141,15 @@ concentration = Σ_i Σ_j allocation[i] × allocation[j] × corr[i,j]
 - 0.50–0.75: Moderately concentrated
 - > 0.75: Highly concentrated (risky)
 
+### Data-Source Diagnostics
+The current implementation also tracks where each ticker's upstream market data came from:
+
+- `alpha-vantage` and `yahoo-finance` count as live sources
+- `mock` indicates live retrieval failed or timed out
+- Portfolio output includes a `dataSources` object with `status`, `sourceBreakdown`, `details`, and a summary message
+
+This helps distinguish portfolio conclusions built from fully live data versus mixed or degraded inputs.
+
 ---
 
 ## Sector Rotation Framework
@@ -183,6 +192,8 @@ target_position = optimal_fraction × portfolio_value
 | 30–44 | 1–3% |
 | < 30 | 0% (exit) |
 
+In the current skill, live ticker fetches are intentionally sequenced instead of run in parallel to reduce Alpha Vantage free-tier burst failures. When a paid or higher-rate source is introduced later, this can be revisited.
+
 ---
 
 ## Expected Return & Volatility
@@ -204,6 +215,16 @@ where cov[i,j] = corr[i,j] × σ_i × σ_j
 sharpeRatio = (E[R_portfolio] − risk_free_rate) / σ_portfolio
 // Typical benchmark: > 0.5 (decent), > 1.0 (excellent)
 ```
+
+---
+
+## Portfolio Narrative
+
+The current implementation does **not** call an LLM for portfolio commentary.
+
+- `portfolioNarrative` is generated deterministically from ranked tickers, sector strength, diversification metrics, and macro regime
+- `llmNarrative` is retained only as a compatibility alias and mirrors `portfolioNarrative`
+- This reduces token usage and makes portfolio output more stable across providers
 
 ---
 

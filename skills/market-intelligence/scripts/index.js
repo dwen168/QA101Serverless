@@ -1,10 +1,9 @@
-const { callDeepSeek } = require('../../../backend/lib/llm');
-const { loadSkills } = require('../../../backend/lib/skill-loader');
-const { normalizeTicker, parseJsonResponse } = require('../../../backend/lib/utils');
+const { normalizeTicker } = require('../../../backend/lib/utils');
 const config = require('../../../backend/lib/config');
 const { calculateAllIndicators } = require('../../../backend/lib/technical-indicators');
 
-const skills = loadSkills();
+const REAL_DATA_TIMEOUT_MS = config.realDataTimeoutMs;
+const ENRICHMENT_TIMEOUT_MS = Math.min(5000, REAL_DATA_TIMEOUT_MS);
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
@@ -104,22 +103,38 @@ function summarizeThemeImpact(theme, sector, ticker) {
   return `${tickerLabel} has secondary exposure to the current ${theme.toLowerCase().replace(/_/g, ' ')} narrative.`;
 }
 
-// LLM batch sentiment scorer — scores all headlines in one API call
-async function scoreSentimentsWithLLM(headlines) {
-  if (!headlines || headlines.length === 0) return [];
-  try {
-    const numbered = headlines.map((h, i) => `${i + 1}. ${h}`).join('\n');
-    const system = 'You are a financial news sentiment analyst. For each headline, return a sentiment score between -1.0 (very negative) and +1.0 (very positive) from an equity investor perspective. 0 is neutral.';
-    const user = `Score each headline. Return ONLY a JSON array of numbers in the same order, e.g. [0.6, -0.3, 0.1].\n\n${numbered}`;
-    const raw = await callDeepSeek(system, user, 0.1, 200);
-    const cleaned = String(raw || '').replace(/```json|```/g, '').trim();
-    const scores = JSON.parse(cleaned);
-    if (!Array.isArray(scores)) return headlines.map(() => 0);
-    return scores.map(s => Math.max(-1, Math.min(1, Number(s) || 0)));
-  } catch {
-    // Fallback: neutral if LLM fails
-    return headlines.map(() => 0);
+const POSITIVE_NEWS_KEYWORDS = [
+  'beats', 'beat', 'surge', 'rally', 'gain', 'gains', 'upgrade', 'upgraded', 'strong', 'record', 'growth',
+  'breakthrough', 'profit', 'profits', 'bullish', 'optimistic', 'recover', 'recovery', 'rebound', 'outperform',
+  'approval', 'expansion', 'tailwind', 'improves', 'improvement', 'cut rates', 'rate cut', 'easing'
+];
+
+const NEGATIVE_NEWS_KEYWORDS = [
+  'miss', 'misses', 'plunge', 'drop', 'falls', 'fall', 'downgrade', 'downgraded', 'weak', 'loss', 'losses',
+  'bearish', 'risk-off', 'selloff', 'recession', 'inflation', 'war', 'conflict', 'sanction', 'tariff',
+  'lawsuit', 'probe', 'investigation', 'default', 'stress', 'volatility', 'headwind', 'cuts outlook',
+  'delay', 'delays', 'layoff', 'layoffs', 'hawkish', 'rate hike', 'higher for longer'
+];
+
+function scoreHeadlineSentimentFallback(headline) {
+  const text = String(headline || '').toLowerCase();
+  if (!text) return 0;
+
+  let score = 0;
+  for (const keyword of POSITIVE_NEWS_KEYWORDS) {
+    if (text.includes(keyword)) score += 0.18;
   }
+  for (const keyword of NEGATIVE_NEWS_KEYWORDS) {
+    if (text.includes(keyword)) score -= 0.18;
+  }
+
+  return Math.max(-1, Math.min(1, parseFloat(score.toFixed(2))));
+}
+
+// Rule-based headline sentiment scorer (no LLM dependency)
+function scoreSentimentsWithRules(headlines) {
+  if (!headlines || headlines.length === 0) return [];
+  return headlines.map((headline) => scoreHeadlineSentimentFallback(headline));
 }
 
 // Fetch news from Finnhub
@@ -139,7 +154,7 @@ async function fetchFinnhubNews(ticker) {
 
     const articles = data.slice(0, 5);
     const headlines = articles.map(a => a.headline || '');
-    const scores = await scoreSentimentsWithLLM(headlines);
+    const scores = scoreSentimentsWithRules(headlines);
 
     return articles.map((article, i) => ({
       title: article.headline || '',
@@ -174,7 +189,7 @@ async function fetchFinnhubMacroNews() {
       })
       .slice(0, 8);
 
-    const scores = await scoreSentimentsWithLLM(filtered.map((article) => article.headline || ''));
+    const scores = scoreSentimentsWithRules(filtered.map((article) => article.headline || ''));
     return filtered.map((article, index) => ({
       title: article.headline || '',
       summary: article.summary || '',
@@ -206,7 +221,7 @@ async function fetchNewsApiMacroNews() {
     if (!Array.isArray(payload.articles)) return [];
 
     const articles = payload.articles.slice(0, 8);
-    const scores = await scoreSentimentsWithLLM(articles.map((article) => article.title || ''));
+    const scores = scoreSentimentsWithRules(articles.map((article) => article.title || ''));
     return articles.map((article, index) => ({
       title: article.title || '',
       summary: article.description || article.content || '',
@@ -405,17 +420,17 @@ async function fetchYahooFinanceData(ticker) {
   const from = new Date(Date.now() - 120 * 24 * 3600 * 1000);
 
   const [chart, summary] = await Promise.all([
-    yf.chart(ticker, {
+    withTimeout(yf.chart(ticker, {
       period1: from.toISOString().split('T')[0],
       period2: to.toISOString().split('T')[0],
       interval: '1d',
       events: '',
     }, {
       validateResult: false,
-    }),
-    yf.quoteSummary(ticker, {
+    }), REAL_DATA_TIMEOUT_MS, `Yahoo chart fetch for ${ticker}`),
+    withTimeout(yf.quoteSummary(ticker, {
       modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend'],
-    }),
+    }), REAL_DATA_TIMEOUT_MS, `Yahoo quote summary fetch for ${ticker}`),
   ]);
 
   const validHistory = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
@@ -472,10 +487,14 @@ async function fetchYahooFinanceData(ticker) {
   // News from Finnhub is US-focused; for non-US tickers use Yahoo Finance search news fallback
   const yahooNews = await (async () => {
     try {
-      const results = await yf.search(ticker, { newsCount: 5, quotesCount: 0 });
+      const results = await withTimeout(
+        yf.search(ticker, { newsCount: 5, quotesCount: 0 }),
+        ENRICHMENT_TIMEOUT_MS,
+        `Yahoo news search for ${ticker}`
+      );
       const items = (results.news || []).slice(0, 5);
       const headlines = items.map((n) => n.title || '');
-      const scores = await scoreSentimentsWithLLM(headlines);
+      const scores = scoreSentimentsWithRules(headlines);
       return items.map((n, i) => ({
         title: n.title || '',
         summary: n.summary || n.description || '',
@@ -505,10 +524,13 @@ async function fetchYahooFinanceData(ticker) {
     }
   })();
 
-  const [finnhubMacroNews, newsApiMacroNews] = await Promise.all([
-    fetchFinnhubMacroNews(),
-    fetchNewsApiMacroNews(),
+  const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
   ]);
+
+  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
+  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
 
   const sentimentScore = yahooNews.length > 0
     ? parseFloat((yahooNews.reduce((s, n) => s + (n.sentiment || 0), 0) / yahooNews.length).toFixed(2))
@@ -733,7 +755,7 @@ async function fetchAlphaVantageMarketData(ticker) {
   }
 
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=compact&apikey=${apiKey}`;
-  const response = await fetch(url);
+  const response = await withTimeout(fetch(url), REAL_DATA_TIMEOUT_MS, `Alpha Vantage core price fetch for ${ticker}`);
 
   if (!response.ok) {
     throw new Error(`Alpha Vantage request failed: ${response.status}`);
@@ -742,6 +764,9 @@ async function fetchAlphaVantageMarketData(ticker) {
   const payload = await response.json();
   if (payload['Error Message']) {
     throw new Error(payload['Error Message']);
+  }
+  if (payload.Information) {
+    throw new Error(payload.Information);
   }
   if (payload.Note) {
     throw new Error(payload.Note);
@@ -821,19 +846,28 @@ async function fetchAlphaVantageMarketData(ticker) {
   let finnhubPriceTarget = null;
 
   if (config.finnhubApiKey) {
-    [finnhubProfile, finnhubMetrics, finnhubNews, finnhubRecommendations, finnhubPriceTarget] = await Promise.all([
-      fetchFinnhubProfile(ticker),
-      fetchFinnhubMetrics(ticker),
-      fetchFinnhubNews(ticker),
-      fetchFinnhubRecommendations(ticker),
-      fetchFinnhubPriceTarget(ticker),
+    const enrichmentResults = await Promise.allSettled([
+      withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
+      withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
+      withTimeout(fetchFinnhubNews(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
+      withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
+      withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
     ]);
+
+    finnhubProfile = enrichmentResults[0].status === 'fulfilled' ? enrichmentResults[0].value : null;
+    finnhubMetrics = enrichmentResults[1].status === 'fulfilled' ? enrichmentResults[1].value : null;
+    finnhubNews = enrichmentResults[2].status === 'fulfilled' ? enrichmentResults[2].value : [];
+    finnhubRecommendations = enrichmentResults[3].status === 'fulfilled' ? enrichmentResults[3].value : null;
+    finnhubPriceTarget = enrichmentResults[4].status === 'fulfilled' ? enrichmentResults[4].value : null;
   }
 
-  const [finnhubMacroNews, newsApiMacroNews] = await Promise.all([
-    fetchFinnhubMacroNews(),
-    fetchNewsApiMacroNews(),
+  const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
   ]);
+
+  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
+  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
 
   // Use Finnhub data if available, otherwise use fallbacks
   const name = finnhubProfile?.name || `${ticker} Corp.`;
@@ -931,8 +965,24 @@ function buildFallbackAnalysis(ticker, marketData) {
       `Price vs MA50: ${((marketData.price / marketData.ma50 - 1) * 100).toFixed(1)}%`,
     ],
     riskFlags: marketData?.macroContext?.riskLevel === 'HIGH' ? ['Macro risk is elevated from current global headlines.'] : [],
-    marketContext: `LLM analysis unavailable - check API key. ${macroText}`,
+    marketContext: macroText,
   };
+}
+
+async function withTimeout(promise, timeoutMs, label = 'operation') {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function runMarketIntelligence({ ticker }, dependencies = {}) {
@@ -949,38 +999,14 @@ async function runMarketIntelligence({ ticker }, dependencies = {}) {
     marketData = generateMockMarketData(cleanTicker);
     marketData.fallbackReason = error && error.message ? error.message : 'Live market API failed';
   }
-  const llm = dependencies.callDeepSeek || callDeepSeek;
-
-  const systemPrompt = `You are an expert financial analyst. You have access to the following skill specification:\n\n${skills['market-intelligence']}\n\nYou are running the market-intelligence skill. Analyze the market data provided and return a structured intelligence report as JSON.`;
-  const userMessage = `Analyze this market data for ${cleanTicker} and return a JSON object with keys: summary (string, 2-3 sentences), keyTrends (array of 3 strings), riskFlags (array of strings), marketContext (string). Data: ${JSON.stringify(marketData, null, 2)}`;
-
-  try {
-    const analysis = await llm(systemPrompt, userMessage);
-    const llmAnalysis = parseJsonResponse(analysis, {
-      summary: analysis,
-      keyTrends: [],
-      riskFlags: [],
-      marketContext: '',
-    });
-
-    return {
-      marketData,
-      llmAnalysis,
-      skillUsed: 'market-intelligence',
-      dataSource: marketData.dataSource,
-      usedFallback: marketData.dataSource === 'mock',
-      fallbackReason: marketData.fallbackReason,
-    };
-  } catch {
-    return {
-      marketData,
-      llmAnalysis: buildFallbackAnalysis(cleanTicker, marketData),
-      skillUsed: 'market-intelligence',
-      dataSource: marketData.dataSource,
-      usedFallback: marketData.dataSource === 'mock',
-      fallbackReason: marketData.fallbackReason,
-    };
-  }
+  return {
+    marketData,
+    llmAnalysis: buildFallbackAnalysis(cleanTicker, marketData),
+    skillUsed: 'market-intelligence',
+    dataSource: marketData.dataSource,
+    usedFallback: marketData.dataSource === 'mock',
+    fallbackReason: marketData.fallbackReason,
+  };
 }
 
 module.exports = {
