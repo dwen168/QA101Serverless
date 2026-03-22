@@ -1,5 +1,6 @@
 const config = require('../../../backend/lib/config');
 const { runMarketIntelligence } = require('../../market-intelligence/scripts');
+const eventSectorRegimes = require('../../trade-recommendation/references/event-sector-regimes.json');
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
@@ -177,12 +178,140 @@ function computeMacroRegime(marketDataArray) {
   };
 }
 
-function getMacroAdjustmentForTicker(marketData, macroRegime) {
-  if (!macroRegime || !macroRegime.available) {
-    return { adjustment: 0, reasons: [] };
+function normalizeText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function canonicalizeSector(sector) {
+  const raw = String(sector || 'Unknown').trim();
+  const lower = raw.toLowerCase();
+  const aliases = eventSectorRegimes?.sectorAliases || {};
+
+  for (const [canonical, candidates] of Object.entries(aliases)) {
+    if (canonical.toLowerCase() === lower) return canonical;
+    if (Array.isArray(candidates) && candidates.some((candidate) => String(candidate).toLowerCase() === lower)) {
+      return canonical;
+    }
   }
 
-  const sector = String(marketData.sector || 'Unknown');
+  return raw || 'Unknown';
+}
+
+function classifyRateSensitivity(sector) {
+  const normalized = canonicalizeSector(sector || 'Unknown');
+  if (['Technology', 'Semiconductors', 'Consumer Discretionary', 'Utilities', 'Healthcare'].includes(normalized)) {
+    return 'GROWTH';
+  }
+  if (normalized === 'Financials') {
+    return 'FINANCIALS';
+  }
+  if (['Industrials', 'Materials', 'Energy'].includes(normalized)) {
+    return 'CYCLICAL';
+  }
+  return 'NEUTRAL';
+}
+
+function computePolicyDirectionalImpact(bank, bias, sector) {
+  const sensitivity = classifyRateSensitivity(sector);
+  if (bias === 'HOLD' || bias === 'WATCH') return 0;
+
+  if (sensitivity === 'GROWTH') return bias === 'EASING' ? 1 : -1;
+  if (sensitivity === 'FINANCIALS') return bias === 'EASING' ? -0.5 : 0.5;
+  if (sensitivity === 'CYCLICAL') return bias === 'EASING' ? 0.4 : -0.4;
+  return bias === 'EASING' ? 0.25 : -0.25;
+}
+
+function detectPortfolioEventRegimes(macroRegime) {
+  if (!macroRegime?.available) return [];
+
+  const themes = (macroRegime?.dominantThemes || [])
+    .map((item) => String(item?.theme || '').toUpperCase())
+    .filter(Boolean);
+  const corpus = normalizeText(macroRegime?.marketContext || '');
+  const regimes = Array.isArray(eventSectorRegimes?.regimes) ? eventSectorRegimes.regimes : [];
+
+  return regimes
+    .map((regime) => {
+      const triggerThemes = Array.isArray(regime?.triggerThemes) ? regime.triggerThemes : [];
+      const keywords = Array.isArray(regime?.keywords) ? regime.keywords : [];
+      const themeMatches = triggerThemes.filter((theme) => themes.includes(String(theme).toUpperCase()));
+      const keywordMatches = keywords.filter((keyword) => corpus.includes(normalizeText(keyword)));
+      if (themeMatches.length === 0 && keywordMatches.length === 0) return null;
+
+      const confidenceRaw =
+        (themeMatches.length > 0 ? 0.55 : 0) +
+        Math.min(0.25, keywordMatches.length * 0.08) +
+        (String(macroRegime?.riskLevel || '').toUpperCase() === 'HIGH' ? 0.1 : 0);
+
+      return {
+        id: regime.id,
+        name: regime.name,
+        intensity: Number(regime.intensity || 1),
+        confidence: Math.min(1, parseFloat(confidenceRaw.toFixed(2))),
+        beneficiarySectors: Array.isArray(regime.beneficiarySectors) ? regime.beneficiarySectors : [],
+        headwindSectors: Array.isArray(regime.headwindSectors) ? regime.headwindSectors : [],
+        businessKeywords: Array.isArray(regime.businessKeywords) ? regime.businessKeywords : [],
+        themeMatches,
+        keywordMatches: keywordMatches.slice(0, 3),
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.confidence - left.confidence)
+    .slice(0, 3);
+}
+
+function buildCompanyCorpus(marketData) {
+  const parts = [
+    marketData?.name || '',
+    marketData?.description || '',
+    marketData?.industry || '',
+    ...((marketData?.news || []).flatMap((n) => [n?.title || '', n?.summary || ''])),
+  ];
+  return normalizeText(parts.join(' '));
+}
+
+function computePortfolioEventRegimeOverlay(marketDataArray, macroRegime) {
+  const regimes = detectPortfolioEventRegimes(macroRegime);
+  if (!regimes.length) {
+    return {
+      available: false,
+      regimes: [],
+      sectorBias: {},
+      summary: 'No active event regimes matched current portfolio macro context.',
+    };
+  }
+
+  const sectors = Array.from(new Set((marketDataArray || []).map((item) => canonicalizeSector(item?.sector || 'Unknown'))));
+  const sectorBias = {};
+
+  for (const sector of sectors) {
+    const bias = regimes.reduce((sum, regime) => {
+      const directional = regime.beneficiarySectors.includes(sector)
+        ? 1
+        : regime.headwindSectors.includes(sector)
+          ? -1
+          : 0;
+      return sum + (directional * regime.intensity * regime.confidence);
+    }, 0);
+
+    sectorBias[sector] = parseFloat(Math.max(-3, Math.min(3, bias)).toFixed(2));
+  }
+
+  const topRegimeNames = regimes.slice(0, 2).map((item) => item.name).join(', ');
+  return {
+    available: true,
+    regimes,
+    sectorBias,
+    summary: `Active event regimes: ${topRegimeNames || 'General macro'}; sector biases applied in ranking.`,
+  };
+}
+
+function getMacroAdjustmentForTicker(marketData, macroRegime, eventOverlay = null) {
+  if (!macroRegime || !macroRegime.available) {
+    return { adjustment: 0, reasons: [], eventAdjustment: 0, eventReasons: [] };
+  }
+
+  const sector = canonicalizeSector(marketData.sector || 'Unknown');
   const themes = (macroRegime.dominantThemes || []).map((item) => item.theme);
   const reasons = [];
   let adjustment = 0;
@@ -198,30 +327,120 @@ function getMacroAdjustmentForTicker(marketData, macroRegime) {
     reasons.push('Supportive macro regime');
   }
 
-  const sectorThemeHints = {
+  // Themes that HURT a sector in a HIGH-risk macro environment
+  const sectorHeadwindThemes = {
     Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
     Semiconductors: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'GEOPOLITICS'],
     Financials: ['MONETARY_POLICY', 'MARKET_STRESS', 'POLITICS_POLICY'],
-    Energy: ['ENERGY_COMMODITIES', 'GEOPOLITICS', 'POLITICS_POLICY'],
+    // Energy BENEFITS from GEOPOLITICS and ENERGY_COMMODITIES (war/supply squeeze → higher oil).
+    // Only MARKET_STRESS (demand destruction) is a genuine headwind for energy producers.
+    Energy: ['MARKET_STRESS'],
     'Automotive/EV': ['SUPPLY_CHAIN', 'ENERGY_COMMODITIES', 'POLITICS_POLICY'],
-    Industrials: ['SUPPLY_CHAIN', 'GEOPOLITICS', 'ENERGY_COMMODITIES'],
+    Industrials: ['SUPPLY_CHAIN', 'MARKET_STRESS'],
     Healthcare: ['POLITICS_POLICY', 'MARKET_STRESS'],
   };
-  const overlap = (sectorThemeHints[sector] || []).filter((theme) => themes.includes(theme));
+  // Themes that HELP a sector in a HIGH-risk macro environment
+  const sectorTailwindThemes = {
+    Energy: ['GEOPOLITICS', 'ENERGY_COMMODITIES'],
+    Industrials: ['GEOPOLITICS'],  // Defence/infrastructure spending during conflict
+  };
+  const headwindOverlap = (sectorHeadwindThemes[sector] || []).filter((theme) => themes.includes(theme));
+  const tailwindOverlap = (sectorTailwindThemes[sector] || []).filter((theme) => themes.includes(theme));
 
-  if (macroRegime.riskLevel === 'HIGH' && overlap.length) {
+  if (macroRegime.riskLevel === 'HIGH' && headwindOverlap.length) {
     adjustment -= 1;
-    reasons.push(`Macro themes pressure ${sector} (${overlap.join(', ')})`);
+    reasons.push(`Macro themes pressure ${sector} (${headwindOverlap.join(', ')})`);
+  }
+  if (macroRegime.riskLevel === 'HIGH' && tailwindOverlap.length) {
+    adjustment += 1;
+    reasons.push(`Macro regime favours ${sector} (${tailwindOverlap.join(', ')})`);
   }
 
-  if (sector === 'Energy' && themes.includes('ENERGY_COMMODITIES') && macroRegime.riskLevel !== 'LOW') {
-    adjustment += 1;
-    reasons.push('Energy may benefit from commodity-risk regime');
+  const ticker = String(marketData?.ticker || '').toUpperCase();
+  const isAsx = ticker.endsWith('.AX');
+  const policy = marketData?.macroContext?.monetaryPolicy || {};
+  const policyEntries = [policy.fed, policy.rba].filter(Boolean);
+  const policyAdjustmentRaw = policyEntries.reduce((sum, entry) => {
+    const bank = String(entry?.bank || '').toUpperCase();
+    const bias = String(entry?.bias || 'WATCH').toUpperCase();
+    const directional = computePolicyDirectionalImpact(bank, bias, sector);
+    // RBA only affects ASX-listed stocks; FED applies universally
+    const relevance = bank === 'RBA' ? (isAsx ? 1 : 0) : 1;
+    return sum + (directional * relevance);
+  }, 0);
+  const policyAdjustment = parseFloat(Math.max(-1.5, Math.min(1.5, policyAdjustmentRaw)).toFixed(1));
+  if (Math.abs(policyAdjustment) >= 0.2) {
+    adjustment += policyAdjustment;
+    const policyDrivers = policyEntries
+      .map((entry) => `${String(entry?.bank || '').toUpperCase()} ${String(entry?.bias || 'WATCH').toUpperCase()}`)
+      .join(', ');
+    reasons.push(`Central-bank policy ${policyAdjustment > 0 ? 'tailwind' : 'headwind'} for ${sector} (${policyDrivers})`);
   }
+
+  const eventReasons = [];
+  let eventAdjustment = 0;
+  if (eventOverlay?.available) {
+    // Per-ticker business analysis: match company's own news/name against regime keywords
+    // This catches cases where sector label misses the real business (e.g. DRO.AX = counter-drone)
+    const companyCorpus = buildCompanyCorpus(marketData);
+
+    const perTickerBias = (eventOverlay.regimes || []).reduce((sum, regime) => {
+      const bizKeywords = [
+        ...(Array.isArray(regime.businessKeywords) ? regime.businessKeywords : []),
+        ...(Array.isArray(regime.keywords) ? regime.keywords : []),
+      ];
+      const companyMatches = companyCorpus
+        ? bizKeywords.filter((kw) => companyCorpus.includes(normalizeText(kw)))
+        : [];
+      const companyDirectMatch = companyMatches.length >= 1;
+
+      const isBeneficiary = regime.beneficiarySectors.includes(sector);
+      const isHeadwind = regime.headwindSectors.includes(sector);
+      let directional = isBeneficiary ? 1 : isHeadwind ? -1 : 0;
+      let coefficient = 1.0;
+
+      if (companyDirectMatch) {
+        if (directional <= 0) {
+          // Company directly operates in this regime's domain → override sector label
+          directional = 1;
+          coefficient = companyMatches.length >= 2 ? 0.9 : 0.7;
+          eventReasons.push(
+            `Business match overrides sector: ${companyMatches.slice(0, 3).join(', ')} → ${regime.name} tailwind`
+          );
+        } else {
+          coefficient = 1.2;
+          eventReasons.push(
+            `Amplified tailwind: ${companyMatches.slice(0, 2).join(', ')} confirms ${regime.name}`
+          );
+        }
+      }
+
+      return sum + (directional * coefficient * regime.intensity * regime.confidence);
+    }, 0);
+
+    eventAdjustment = parseFloat(Math.max(-3, Math.min(3, perTickerBias)).toFixed(1));
+
+    if (Math.abs(eventAdjustment) >= 0.2 && eventReasons.length === 0) {
+      const direction = eventAdjustment > 0 ? 'tailwind' : 'headwind';
+      const keyRegimeNames = (eventOverlay.regimes || [])
+        .filter((r) =>
+          eventAdjustment > 0
+            ? r.beneficiarySectors.includes(sector)
+            : r.headwindSectors.includes(sector)
+        )
+        .slice(0, 2)
+        .map((r) => r.name);
+      eventReasons.push(`Event-regime ${direction} for ${sector}${keyRegimeNames.length ? ` (${keyRegimeNames.join(', ')})` : ''}`);
+    }
+  }
+
+  const total = adjustment + eventAdjustment;
 
   return {
-    adjustment: parseFloat(adjustment.toFixed(1)),
+    adjustment: parseFloat(total.toFixed(1)),
     reasons,
+    eventAdjustment: parseFloat(eventAdjustment.toFixed(1)),
+    eventReasons,
   };
 }
 
@@ -591,6 +810,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   const dataSources = summarizeDataSources(marketDataArray);
 
   const macroRegime = computeMacroRegime(marketDataArray);
+  const eventRegimeOverlay = computePortfolioEventRegimeOverlay(marketDataArray, macroRegime);
   const derivedMetrics = buildDerivedMarketMetrics(marketDataArray);
   
   // Compute factor scores
@@ -599,13 +819,15 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   // Create ranked list
   const rankedData = marketDataArray.map((md, idx) => {
     const baseScores = scores[idx];
-    const macroAdj = getMacroAdjustmentForTicker(md, macroRegime);
+    const macroAdj = getMacroAdjustmentForTicker(md, macroRegime, eventRegimeOverlay);
     const adjustedComposite = clamp(baseScores.composite + macroAdj.adjustment, 0, 100);
     return {
       ...md,
       ...baseScores,
       macroAdjustment: macroAdj.adjustment,
       macroReasons: macroAdj.reasons,
+      eventAdjustment: macroAdj.eventAdjustment,
+      eventReasons: macroAdj.eventReasons,
       adjustedComposite: parseFloat(adjustedComposite.toFixed(1)),
     };
   });
@@ -632,6 +854,8 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
       baseCompositeScore: data.composite,
       macroAdjustment: data.macroAdjustment,
       macroReasons: data.macroReasons,
+      eventAdjustment: data.eventAdjustment,
+      eventReasons: data.eventReasons,
       allocation: parseFloat(scaledAllocation.toFixed(1)),
       scores: {
         momentum: data.momentum,
@@ -680,6 +904,9 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
       ? `${portfolioNarrative.executiveSummary} ${macroText}`
       : macroText;
   }
+  if (eventRegimeOverlay.available) {
+    portfolioNarrative.executiveSummary = `${portfolioNarrative.executiveSummary} ${eventRegimeOverlay.summary}`;
+  }
   if (macroRegime.riskLevel === 'HIGH') {
     portfolioNarrative.recommendations = Array.from(new Set([...(portfolioNarrative.recommendations || []), 'Increase cash buffer and reduce high-beta concentration while macro risk remains elevated.']));
     portfolioNarrative.riskWarnings = Array.from(new Set([...(portfolioNarrative.riskWarnings || []), 'Macro risk regime is HIGH; drawdown probability is elevated across correlated risk assets.']));
@@ -692,6 +919,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
     diversificationMetrics,
     dataSources,
     macroRegime,
+    eventRegimeOverlay,
     portfolioMetrics: {
       totalAllocation: totalAllocation,
       cashBuffer: 100 - totalAllocation,

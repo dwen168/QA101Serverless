@@ -626,6 +626,12 @@
     transition: var(--transition);
     box-shadow: 0 1px 3px rgba(0,0,0,0.15);
   }
+  .macro-theme-chip {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
   .detail-chip span { color: var(--text3); margin-right: 2px; }
 
   /* ── Historical Patterns card ── */
@@ -1370,6 +1376,7 @@ function renderPortfolioOptimization(result, panel) {
   const div = result.diversificationMetrics || {};
   const narrative = result.portfolioNarrative || result.llmNarrative || {};
   const macro = result.macroRegime || {};
+  const eventOverlay = result.eventRegimeOverlay || {};
   const dataSources = result.dataSources || {};
 
   const section = document.createElement('div');
@@ -1441,7 +1448,7 @@ function renderPortfolioOptimization(result, panel) {
       </div>
       <div class="ticker-stats" style="margin-top:0;padding-top:0;border-top:none;grid-template-columns:repeat(3,1fr)">
         <div class="stat-item"><span class="stat-label">MACRO TONE</span><span class="stat-value" style="color:${macroColor}">${macro.sentimentLabel} (${macro.sentimentScore > 0 ? '+' : ''}${(macro.sentimentScore ?? 0).toFixed(2)})</span></div>
-        <div class="stat-item"><span class="stat-label">DOMINANT THEMES</span><span class="stat-value">${(macro.dominantThemes || []).slice(0, 2).map(item => String(item.theme || '').replace(/_/g, ' ')).join(' · ') || 'None'}</span></div>
+        <div class="stat-item"><span class="stat-label">DOMINANT THEMES</span><span class="stat-value">${(macro.dominantThemes || []).slice(0, 3).map(item => String(item.theme || '').replace(/_/g, ' ')).join(' · ') || 'None'}</span></div>
         <div class="stat-item"><span class="stat-label">SOURCES</span><span class="stat-value">${macro.sourceCount || 0} ticker feeds</span></div>
       </div>
       <p style="margin-top:10px;font-size:12px;color:var(--text2)">${macro.marketContext || ''}</p>
@@ -1449,22 +1456,57 @@ function renderPortfolioOptimization(result, panel) {
     panel.appendChild(macroCard);
   }
 
+  if (eventOverlay.available) {
+    const eventCard = document.createElement('div');
+    eventCard.className = 'card fade-in';
+
+    const regimeChips = (eventOverlay.regimes || []).map((regime) => {
+      const conf = Number(regime.confidence || 0);
+      const intensity = Number(regime.intensity || 1);
+      return `<span class="detail-chip">${regime.name} · conf ${(conf * 100).toFixed(0)}% · x${intensity.toFixed(1)}</span>`;
+    }).join('');
+
+    const sectorBiasChips = Object.entries(eventOverlay.sectorBias || {})
+      .sort((left, right) => Number(right[1]) - Number(left[1]))
+      .slice(0, 8)
+      .map(([sector, bias]) => {
+        const val = Number(bias || 0);
+        const color = val > 0 ? 'var(--green)' : val < 0 ? 'var(--red)' : 'var(--text2)';
+        return `<span class="detail-chip" style="color:${color}">${sector}: ${val > 0 ? '+' : ''}${val.toFixed(2)}</span>`;
+      }).join('');
+
+    eventCard.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Portfolio Event Regime Overlay</span>
+        <span style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)">ACTIVE</span>
+      </div>
+      <p style="font-size:12px;color:var(--text2);line-height:1.55">${eventOverlay.summary || 'Event regime overlay active.'}</p>
+      <p style="font-size:11px;color:var(--text3);margin-top:4px">Sector biases shown below are baseline estimates. Per-ticker adjustments in the ranking table reflect each company's actual business activities.</p>
+      ${regimeChips ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${regimeChips}</div>` : ''}
+      ${sectorBiasChips ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">${sectorBiasChips}</div>` : ''}
+    `;
+
+    panel.appendChild(eventCard);
+  }
+
   const ranking = document.createElement('div');
   ranking.className = 'card fade-in';
   ranking.innerHTML = `
     <div class="card-header"><span class="card-title">Ranked Tickers</span></div>
-    <div style="display:grid;grid-template-columns:50px 90px 90px 100px 90px 90px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
-      <span>Rank</span><span>Ticker</span><span>Action</span><span>Score</span><span>Macro Adj</span><span>Alloc</span>
+    <div style="display:grid;grid-template-columns:50px 88px 88px 96px 84px 84px 78px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+      <span>Rank</span><span>Ticker</span><span>Action</span><span>Score</span><span>Macro</span><span>Event</span><span>Alloc</span>
     </div>
     ${(ranked || []).map(r => `
-      <div style="display:grid;grid-template-columns:50px 90px 90px 100px 90px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
+      <div style="display:grid;grid-template-columns:50px 88px 88px 96px 84px 84px 78px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
         <span style="color:var(--text3)">#${r.rank}</span>
         <span style="color:var(--cyan)">${r.ticker}</span>
         <span style="color:${r.action && r.action.includes('BUY') ? 'var(--green)' : r.action === 'SELL' ? 'var(--red)' : 'var(--amber)'}">${r.action || 'HOLD'}</span>
         <span>${(r.compositeScore ?? 0).toFixed(1)} <span style="color:var(--text3)">(${(r.baseCompositeScore ?? r.compositeScore ?? 0).toFixed(1)})</span></span>
         <span style="color:${(r.macroAdjustment ?? 0) < 0 ? 'var(--red)' : (r.macroAdjustment ?? 0) > 0 ? 'var(--green)' : 'var(--text2)'}">${(r.macroAdjustment ?? 0) > 0 ? '+' : ''}${(r.macroAdjustment ?? 0).toFixed(1)}</span>
+        <span style="color:${(r.eventAdjustment ?? 0) < 0 ? 'var(--red)' : (r.eventAdjustment ?? 0) > 0 ? 'var(--green)' : 'var(--text2)'}">${(r.eventAdjustment ?? 0) > 0 ? '+' : ''}${(r.eventAdjustment ?? 0).toFixed(1)}</span>
         <span>${(r.allocation ?? 0).toFixed(1)}%</span>
       </div>
+      ${Array.isArray(r.eventReasons) && r.eventReasons.length ? `<div style="margin:-2px 0 8px 58px;font-size:11px;color:var(--text3)">${r.eventReasons.map(reason => `<span class="detail-chip">${reason}</span>`).join(' ')}</div>` : ''}
     `).join('')}
   `;
   panel.appendChild(ranking);
@@ -1698,6 +1740,29 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   const macroScore = Number.isFinite(macro.sentimentScore) ? macro.sentimentScore : 0;
   const macroColor = macroScore > 0.1 ? 'var(--green)' : macroScore < -0.1 ? 'var(--red)' : 'var(--amber)';
   const macroPct = ((macroScore + 1) / 2 * 100).toFixed(0);
+  const macroNews = Array.isArray(macro.news) ? macro.news : [];
+  const monetaryPolicy = macro.monetaryPolicy || {};
+  const renderMacroThemeChip = (theme) => `<span class="detail-chip macro-theme-chip">${String(theme || 'GENERAL_MACRO').replace(/_/g, ' ')}</span>`;
+  const renderPolicyChip = (policy) => {
+    const bias = String(policy?.bias || 'WATCH').toUpperCase();
+    const color = bias === 'EASING'
+      ? 'var(--green)'
+      : bias === 'TIGHTENING'
+        ? 'var(--red)'
+        : 'var(--cyan)';
+    return `<span class="detail-chip macro-theme-chip" style="color:${color};border-color:${color === 'var(--green)' ? 'rgba(16,232,152,0.25)' : color === 'var(--red)' ? 'rgba(255,75,110,0.25)' : 'rgba(0,212,255,0.25)'}">${policy?.bank || 'POLICY'} · ${bias}</span>`;
+  };
+  const displayedMacroNews = (() => {
+    const topSix = macroNews.slice(0, 6);
+    const policyItem = macroNews.find((item) => String(item?.theme || '').toUpperCase() === 'MONETARY_POLICY');
+    if (!policyItem || topSix.some((item) => item?.title === policyItem.title)) {
+      return topSix;
+    }
+    return [policyItem, ...topSix.slice(0, 5)];
+  })();
+  const hasMonetaryTheme = (macro.dominantThemes || []).some((item) => String(item?.theme || '').toUpperCase() === 'MONETARY_POLICY')
+    || macroNews.some((item) => String(item?.theme || '').toUpperCase() === 'MONETARY_POLICY');
+  const dominantThemeChips = (macro.dominantThemes || []).slice(0, 3).map((item) => renderMacroThemeChip(item.theme)).join('');
 
   const fmtNum = (n) => n?.toLocaleString('en-US', { maximumFractionDigits: 2 }) ?? '—';
   const sourceBreakdown = d.dataSourceBreakdown || {};
@@ -1806,8 +1871,18 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
         <span class="ticker-symbol">${d.ticker}</span>
         <span class="ticker-name">${d.name}</span>
         <span class="ticker-sector">${d.sector}</span>
-        <span style="font-size:10px;color:${sourceColor};font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-left:8px;padding:2px 6px;background:rgba(255,255,255,0.05);border-radius:3px">${sourceLabel}</span>
+        ${d.industry && d.industry !== d.sector ? `<span class="ticker-sector" style="opacity:0.65">${d.industry}</span>` : ''}
+        ${d.exchange ? `<span style="font-size:10px;color:var(--text3);font-family:var(--mono);padding:2px 5px;background:rgba(255,255,255,0.04);border-radius:3px;border:1px solid var(--border)">${d.exchange}</span>` : ''}
+        <span style="font-size:10px;color:${sourceColor};font-weight:500;text-transform:uppercase;letter-spacing:0.5px;margin-left:4px;padding:2px 6px;background:rgba(255,255,255,0.05);border-radius:3px">${sourceLabel}</span>
       </div>
+      ${d.description ? `
+      <div style="margin-top:8px;font-size:12px;color:var(--text2);line-height:1.6;max-width:720px;padding:8px 10px;border-left:2px solid rgba(0,212,255,0.35);background:rgba(0,212,255,0.04);border-radius:0 6px 6px 0">
+        <span style="font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;color:var(--cyan);font-weight:600">Business</span>
+        <span style="margin-left:8px">${d.description}</span>
+        ${d.employees ? `<span style="margin-left:10px;font-size:10px;font-family:var(--mono);color:var(--text3)">${Number(d.employees).toLocaleString()} employees</span>` : ''}
+        ${d.website ? `<a href="${d.website}" target="_blank" rel="noopener noreferrer" style="margin-left:10px;font-size:10px;font-family:var(--mono);color:var(--cyan);text-decoration:none;opacity:0.7">${d.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</a>` : ''}
+      </div>
+      ` : ''}
       <div class="ticker-right">
         <div class="ticker-price">$${fmtNum(d.price)}</div>
         <div class="ticker-change ${changeClass}">${changeSign}${fmtNum(d.change)} (${changeSign}${d.changePercent.toFixed(2)}%)</div>
@@ -1911,26 +1986,42 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       </div>
       <div class="stat-item">
         <span class="stat-label">DOMINANT THEMES</span>
-        <span class="stat-value">${(macro.dominantThemes || []).slice(0, 2).map(item => item.theme.replace(/_/g, ' ')).join(' · ') || 'None'}</span>
+        <span class="stat-value" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">${dominantThemeChips || 'None'}</span>
       </div>
       <div class="stat-item">
         <span class="stat-label">MACRO FEED</span>
         <span class="stat-value">${macro.available ? `${macro.sourceBreakdown?.articleCount || 0} articles` : 'Unavailable'}</span>
       </div>
     </div>
+    ${hasMonetaryTheme ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px"><span class="detail-chip macro-theme-chip" style="color:var(--cyan);border-color:rgba(0,212,255,0.25);background:rgba(0,212,255,0.08)">Latest FED/RBA Rate Decisions</span></div>` : ''}
+    ${monetaryPolicy?.available ? `
+      <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
+        ${[monetaryPolicy.fed, monetaryPolicy.rba].map(policy => `
+          <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,0.02)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+              <div style="font-size:11px;font-family:var(--mono);letter-spacing:0.08em;text-transform:uppercase;color:var(--text3)">${policy?.bank || 'Policy'} Latest Decision</div>
+              ${renderPolicyChip(policy)}
+            </div>
+            <div style="font-size:12px;color:var(--text);margin-top:8px;line-height:1.55">${policy?.impact || 'No policy impact summary available.'}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:8px;line-height:1.5">${policy?.headline || ''}</div>
+            <div style="font-size:10px;color:var(--text3);font-family:var(--mono);margin-top:6px">${Number.isFinite(Number(policy?.hoursAgo)) ? `${Number(policy.hoursAgo)}h ago` : 'Monitoring current policy window'}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
     <p style="font-size:13px;line-height:1.6;color:var(--text2);margin-top:12px">${macro.marketContext || 'No macro context was returned.'}</p>
     ${(macro.impactNotes || []).length ? `<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">${macro.impactNotes.map(note => `<div class="insight-item"><div class="insight-dot"></div>${note}</div>`).join('')}</div>` : ''}
-    ${(macro.news || []).length ? `
+    ${displayedMacroNews.length ? `
       <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
         <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Macro Headlines</div>
-        ${(macro.news || []).slice(0, 3).map(item => `
+        ${displayedMacroNews.map(item => `
           <div class="news-item" style="padding:8px 0">
             <div>
               <div class="news-title">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.title}</a>` : item.title}</div>
               <div class="news-meta">
                 <span class="news-source">${item.source}</span>
                 <span class="news-time">${item.hoursAgo}h ago</span>
-                <span class="detail-chip">${String(item.theme || 'GENERAL_MACRO').replace(/_/g, ' ')}</span>
+                ${renderMacroThemeChip(item.theme)}
               </div>
             </div>
             <span class="news-sentiment ${item.sentiment > 0.1 ? 'pos' : item.sentiment < -0.1 ? 'neg' : 'neutral'}">${item.sentiment > 0 ? '+' : ''}${Number(item.sentiment || 0).toFixed(2)}</span>
@@ -2349,6 +2440,30 @@ function renderRecommendation(rec, panel) {
     <div class="rr-badge" style="background:${rrColor}15;color:${rrColor};border:1px solid ${rrColor}30">Risk/Reward: ${rec.riskReward}:1 · ${rec.timeHorizon} term</div>
     ${rec.objectiveProfile ? `<div class="rr-badge" style="margin-top:8px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)">Recommendation Lens: ${rec.objectiveProfile.label} · ${rec.objectiveProfile.holdingPeriod}</div>` : ''}
     ${rec.macroOverlay?.available ? `<div class="rr-badge" style="margin-top:8px;background:${rec.macroOverlay.riskLevel === 'HIGH' ? 'var(--red-dim)' : rec.macroOverlay.riskLevel === 'LOW' ? 'var(--green-dim)' : 'var(--amber-dim)'};color:${rec.macroOverlay.riskLevel === 'HIGH' ? 'var(--red)' : rec.macroOverlay.riskLevel === 'LOW' ? 'var(--green)' : 'var(--amber)'};border:1px solid ${rec.macroOverlay.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.35)' : rec.macroOverlay.riskLevel === 'LOW' ? 'rgba(16,232,152,0.35)' : 'rgba(245,166,35,0.35)'}">Macro Overlay: ${rec.macroOverlay.riskLevel} · ${rec.macroOverlay.sentimentLabel}${(rec.macroOverlay.dominantThemes || []).length ? ` · ${rec.macroOverlay.dominantThemes.map(t => t.theme).join(', ')}` : ''}</div>` : ''}
+    ${rec.eventRegimeOverlay?.available ? `<div class="rr-badge" style="margin-top:8px;background:${rec.eventRegimeOverlay.direction === 'TAILWIND' ? 'var(--green-dim)' : rec.eventRegimeOverlay.direction === 'HEADWIND' ? 'var(--red-dim)' : 'var(--amber-dim)'};color:${rec.eventRegimeOverlay.direction === 'TAILWIND' ? 'var(--green)' : rec.eventRegimeOverlay.direction === 'HEADWIND' ? 'var(--red)' : 'var(--amber)'};border:1px solid ${rec.eventRegimeOverlay.direction === 'TAILWIND' ? 'rgba(16,232,152,0.35)' : rec.eventRegimeOverlay.direction === 'HEADWIND' ? 'rgba(255,75,110,0.35)' : 'rgba(245,166,35,0.35)'}">Event Overlay: ${rec.eventRegimeOverlay.direction || 'NEUTRAL'} · Bias ${(Number(rec.eventRegimeOverlay.netBias || 0) > 0 ? '+' : '') + Number(rec.eventRegimeOverlay.netBias || 0).toFixed(2)} · ${rec.eventRegimeOverlay.sector || 'Unknown'}</div>` : ''}
+
+    ${rec.eventRegimeOverlay?.available ? `
+      <div style="margin-top:12px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Event Regime Impact</div>
+          <span class="detail-chip" style="color:${rec.eventRegimeOverlay.direction === 'TAILWIND' ? 'var(--green)' : rec.eventRegimeOverlay.direction === 'HEADWIND' ? 'var(--red)' : 'var(--amber)'}">${rec.eventRegimeOverlay.summary || 'Event-regime impact applied'}</span>
+        </div>
+        <div style="height:8px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,0.05);margin-top:8px;position:relative">
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(157,179,212,0.45)"></div>
+          <div style="position:absolute;top:0;bottom:0;${Number(rec.eventRegimeOverlay.netBias || 0) >= 0 ? 'left:50%' : `left:calc(50% - ${Math.min(50, Math.abs(Number(rec.eventRegimeOverlay.netBias || 0)) * 20).toFixed(1)}%)`};width:${Math.min(50, Math.abs(Number(rec.eventRegimeOverlay.netBias || 0)) * 20).toFixed(1)}%;background:${Number(rec.eventRegimeOverlay.netBias || 0) >= 0 ? 'rgba(16,232,152,0.75)' : 'rgba(255,75,110,0.75)'}"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;font-family:var(--mono);color:var(--text3)"><span>Headwind</span><span>Neutral</span><span>Tailwind</span></div>
+        ${(rec.eventRegimeOverlay.regimes || []).length ? `<div class="signal-detail" style="margin-left:0;margin-top:8px">${rec.eventRegimeOverlay.regimes.map(regime => {
+          const bizMatches = Array.isArray(regime.companyKeywordMatches) ? regime.companyKeywordMatches : [];
+          const overridden = regime.companyDirectMatch && regime.sectorBased !== regime.direction;
+          const chipColor = regime.companyDirectMatch ? 'var(--green)' : 'var(--text2)';
+          const bizTag = regime.companyDirectMatch
+            ? ` · ★ ${bizMatches.slice(0,3).join(', ')}${overridden ? ' (override)' : ''}`
+            : '';
+          return `<span class="detail-chip" style="color:${chipColor}">${regime.name} · ${regime.direction} · conf ${(Number(regime.confidence || 0) * 100).toFixed(0)}%${bizTag}</span>`;
+        }).join('')}</div>` : ''}
+      </div>
+    ` : ''}
 
     ${rec.objectiveProfile?.focus ? `<p style="font-size:13px;line-height:1.65;color:var(--text);margin-top:12px;padding:8px 10px;border-radius:8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.18)"><span style="font-family:var(--mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--cyan);font-weight:600">Objective Focus</span><br><span style="font-weight:600">${rec.objectiveProfile.focus}</span></p>` : ''}
     ${rec.objectiveProfile ? `

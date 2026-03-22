@@ -118,3 +118,81 @@ Where `alignment = |positiveMagnitude − negativeMagnitude| / totalMagnitude`.
 | `backend/scripts/signal-calibration.py` | yfinance source, TimeSeriesSplit CV, multi-horizon, 9 new features, `scale_pos_weight`, PR-AUC |
 | `backend/lib/signal-weights.json` | v2.1-timeseries-horizon-calibrated; 8 ASX tickers; per-horizon weights stored |
 | `backend/docs/SIGNAL_WEIGHTS_CALIBRATION.md` | Fully updated with all new methodology and CLI reference |
+
+---
+
+## 6) Post-v2.3 Addendum (March 22, 2026)
+
+This addendum records the latest production fixes implemented after the original V2.3 write-up.
+
+### 6.1 Central-Bank Policy Modeling (FED/RBA)
+
+- Monetary policy handling is now **bank-specific** and explicitly separated into:
+  - `macroContext.monetaryPolicy.fed`
+  - `macroContext.monetaryPolicy.rba`
+- Both entries focus on the **latest actual rate-decision headline** (with NewsAPI primary + Google News RSS fallback).
+- Policy bias classification now uses explicit decision phrases (`HOLD`, `TIGHTENING`, `EASING`, `WATCH`) and emits stock-impact text by sector.
+
+### 6.2 Scope Rule Fix: RBA vs FED
+
+- Policy relevance was corrected to match market scope:
+  - **RBA only affects ASX tickers** (`*.AX`)
+  - **FED affects all tickers globally**
+- This logic is now applied consistently in both:
+  - `skills/trade-recommendation/scripts/index.js`
+  - `skills/portfolio-optimization/scripts/index.js`
+
+### 6.3 Policy Overlay -> Real Scoring (Trade Recommendation)
+
+- Central-bank policy is no longer display-only; it now contributes to recommendation scoring as explicit signals:
+  - `Central Bank Policy Tailwind`
+  - `Central Bank Policy Headwind`
+- Fixed a rounding/visibility bug where small calibrated values were rounded to zero and silently dropped.
+- Added a minimum visible contribution threshold (`±0.5`) when policy overlay is materially active.
+
+### 6.4 Portfolio Optimization: Policy-Aware Macro Adjustment
+
+- Portfolio ranking now incorporates FED/RBA directional impact per ticker via macro adjustment reasons and score shift.
+- Output includes transparent rationale such as:
+  - `Central-bank policy tailwind/headwind for <Sector> (<FED/RBA bias drivers>)`
+
+### 6.5 Company Profile Completeness for US Stocks (e.g., MSFT)
+
+- US tickers on the Finnhub path previously lacked business profile fields in UI (`description`, `industry`, `employees`, `website`, `country`).
+- Root cause: Finnhub `profile2` free-tier payload is sparse and did not provide full profile data.
+- Fix:
+  - Finnhub profile mapping now includes available fields (`country`, `weburl`).
+  - Added a lightweight Yahoo `summaryProfile` supplement in the Finnhub path to fill:
+    - `description`
+    - `industry`
+    - `employees`
+    - `website`
+    - `country`
+- Result: US and ASX tickers now render company profile blocks more consistently.
+
+### 6.6 Company News Source Reliability Fix (Finnhub timeout -> Yahoo fallback loop)
+
+- Symptom: some US tickers showed company news as Yahoo fallback even when Finnhub had abundant data.
+- Root cause: per-article source resolution followed finnhub redirect URLs and consumed the full 5s enrichment budget, causing `fetchFinnhubNews` timeout and fallback.
+- Fix: use Finnhub-provided `article.source` directly and remove expensive per-article redirect resolution in this path.
+- Result:
+  - Finnhub company news now reliably loads as `Finnhub (Real)` for supported US tickers.
+  - Unnecessary fallback frequency is significantly reduced.
+
+### 6.7 Macro vs Event Consistency Fix for Energy in War Regimes (CVX case)
+
+- Symptom: Energy tickers could show both:
+  - `+ Event Regime Tailwind` (war benefit)
+  - `- Macro-Sector Headwind` (incorrectly tagging geopolitics as pressure)
+- Root cause: sector-theme logic treated all overlapping high-risk themes as headwinds, including `GEOPOLITICS` for Energy.
+- Fix: split macro sector mapping into explicit **headwind themes** and **tailwind themes**.
+  - Energy now treats:
+    - `GEOPOLITICS` / `ENERGY_COMMODITIES` as tailwinds
+    - `MARKET_STRESS` as the true headwind (demand-destruction risk)
+- Applied in both trade and portfolio engines to keep cross-skill behavior consistent.
+
+### 6.8 UI/Context Transparency Improvements
+
+- Macro display now keeps policy visibility practical by preserving policy coverage in macro output and showing richer FED/RBA context.
+- Theme labeling/chip style was normalized for consistent readability across macro themes.
+

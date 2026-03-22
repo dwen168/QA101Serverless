@@ -1,0 +1,68 @@
+{
+  "version": "1.1",
+  "updatedAt": "2026-03-22",
+  "sectorAliases": {
+    "Defense": ["Aerospace & Defense", "Aerospace and Defense", "Defense", "Military"],
+    "Energy": ["Oil & Gas", "Energy", "Integrated Oil & Gas", "Utilities Energy"],
+    "Financials": ["Banks", "Banking", "Financial Services", "Financials"],
+    "Technology": ["Tech", "Information Technology", "Technology"],
+    "Semiconductors": ["Semis", "Semiconductor", "Semiconductors"],
+    "Industrials": ["Industrial", "Industrials", "Capital Goods", "Transportation"],
+    "Healthcare": ["Health Care", "Healthcare", "Biotech", "Pharmaceuticals"],
+    "Consumer Discretionary": ["Consumer Cyclical", "Retail", "Consumer Discretionary"],
+    "Materials": ["Commodities", "Metals & Mining", "Materials"],
+    "Utilities": ["Utilities", "Power", "Electric Utilities"]
+  },
+  "regimes": [
+    {
+      "id": "war-escalation",
+      "name": "War / Geopolitical Escalation",
+      "triggerThemes": ["GEOPOLITICS", "MARKET_STRESS"],
+      "keywords": ["war", "conflict", "missile", "sanction", "ceasefire", "military", "defense", "geopolitical"],
+      "businessKeywords": ["drone", "counter-drone", "uav", "counter-uas", "unmanned aerial", "c-uas", "anti-drone", "ammunition", "ammo", "artillery", "armor", "ballistic", "weapon system", "radar system", "electronic warfare", "cyber warfare", "reconnaissance", "interceptor", "surveillance system", "border security", "naval", "combat system", "perimeter defense", "body armor", "military contract", "defense contract"],
+      "beneficiarySectors": ["Defense", "Energy"],
+      "headwindSectors": ["Consumer Discretionary", "Industrials", "Technology"],
+      "intensity": 1.2
+    },
+    {
+      "id": "oil-supply-shock",
+      "name": "Oil Supply Shock / Energy Crisis",
+      "triggerThemes": ["ENERGY_COMMODITIES", "GEOPOLITICS"],
+      "keywords": ["oil", "crude", "opec", "supply disruption", "strait of hormuz", "energy crisis", "gas prices"],
+      "businessKeywords": ["upstream", "downstream", "refinery", "refineries", "pipeline", "lng", "liquefied natural gas", "petroleum", "wellhead", "drilling", "fracking", "offshore oil", "tanker", "oil sands", "hydrocarbon", "fuel distribution", "exploration production", "barrel", "oil field", "oilfield", "natural gas production"],
+      "beneficiarySectors": ["Energy", "Materials"],
+      "headwindSectors": ["Industrials", "Consumer Discretionary"],
+      "intensity": 1.1
+    },
+    {
+      "id": "rate-hike-cycle",
+      "name": "Rate Hike / Tightening Cycle",
+      "triggerThemes": ["MONETARY_POLICY", "MARKET_STRESS"],
+      "keywords": ["rate hike", "higher for longer", "hawkish", "inflation", "yield", "tightening"],
+      "businessKeywords": ["mortgage", "lending", "loan origination", "credit", "commercial bank", "retail bank", "digital bank", "brokerage", "asset management", "wealth management", "insurance premium", "fixed income", "bond", "treasury", "net interest margin", "deposit"],
+      "beneficiarySectors": ["Financials"],
+      "headwindSectors": ["Technology", "Consumer Discretionary", "Utilities"],
+      "intensity": 1.0
+    },
+    {
+      "id": "rate-cut-cycle",
+      "name": "Rate Cut / Easing Cycle",
+      "triggerThemes": ["MONETARY_POLICY"],
+      "keywords": ["rate cut", "easing", "liquidity", "dovish", "disinflation"],
+      "businessKeywords": ["saas", "cloud platform", "software subscription", "renewable energy", "solar panel", "wind energy", "ev battery", "electric vehicle", "housing", "home builder", "consumer credit", "fintech", "growth software", "ai platform"],
+      "beneficiarySectors": ["Technology", "Consumer Discretionary", "Utilities"],
+      "headwindSectors": ["Financials"],
+      "intensity": 0.8
+    },
+    {
+      "id": "supply-chain-disruption",
+      "name": "Supply Chain Disruption",
+      "triggerThemes": ["SUPPLY_CHAIN", "GEOPOLITICS"],
+      "keywords": ["supply chain", "factory", "export control", "shipping lane", "port", "semiconductor shortage"],
+      "businessKeywords": ["semiconductor fab", "chip manufacturing", "wafer", "foundry", "pcb", "electronics manufacturing", "logistics provider", "freight", "shipping container", "last mile", "warehouse", "distribution center", "procurement", "third-party manufacturing", "offshore manufacturing", "just in time"],
+      "beneficiarySectors": ["Defense", "Utilities"],
+      "headwindSectors": ["Semiconductors", "Industrials", "Consumer Discretionary"],
+      "intensity": 0.9
+    }
+  ]
+}

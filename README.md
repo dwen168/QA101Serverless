@@ -11,12 +11,24 @@ An agent-skills–based stock analysis chatbot powered by a selectable **DeepSee
 - Portfolio optimization and backtesting now surface whether results came from live APIs, mock fallback data, or a mixed source set.
 - Market intelligence now includes a macro/geopolitical context layer, so global headlines such as wars, Fed tone, tariffs, and oil shocks can be surfaced alongside ticker-specific news.
 - Trade recommendation now uses the macro regime as a scoring overlay, affecting signal totals, confidence, and key risk flags.
+- Trade recommendation now includes an event-sector knowledge base overlay (e.g., war, oil shock, rate-hike regime), dynamically boosting or reducing sector signal strength.
 - Portfolio optimization now applies macro-regime tilts to ranking and allocations, including defensive cash-bias in high-risk regimes.
 - Market intelligence headline sentiment and portfolio narrative generation now use rule-based logic instead of LLM calls, reducing token usage and improving stability on local models.
 - News cards now show richer article context with summaries and source links instead of headline-only display.
 - News summaries are collapsible, so the analysis panel stays compact while keeping source detail available on demand.
 - MACD signal-line calculation now uses the standard EMA-based MACD(12,26,9) method.
 - Signal calibration documentation is consolidated in `backend/docs/SIGNAL_WEIGHTS_CALIBRATION.md`.
+
+## Latest Updates (Mar 22, 2026)
+
+- Central-bank policy context is now split into dedicated FED and RBA tracks (`fed` / `rba`) with latest rate-decision focus and clearer bias labels (`EASING`, `TIGHTENING`, `HOLD`, `WATCH`).
+- Policy scope is now explicit and consistent across engines: **RBA affects ASX tickers only (`*.AX`)**, while **FED affects all tickers**.
+- Policy overlay is now wired into scoring (not just display):
+    - Trade recommendations can emit `Central Bank Policy Tailwind/Headwind` signals.
+    - Portfolio optimization includes policy-aware macro adjustments with transparent driver reasons.
+- Company profile consistency improved for US tickers on the Finnhub route (e.g., `MSFT`): business summary fields (`description`, `industry`, `employees`, `website`, `country`) are now populated via a lightweight Yahoo summary-profile supplement.
+- Finnhub company-news reliability improved: removed an expensive redirect-based source resolution path that could trigger timeout and force unnecessary Yahoo fallback.
+- Macro/event consistency fixed for energy names (e.g., `CVX`) by separating sector **headwind themes** vs **tailwind themes** under high-risk regimes (war/geopolitics now correctly treated as an energy tailwind).
 
 ## Architecture
 
@@ -185,8 +197,10 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 - Calculates advanced technical indicators: **MACD, Bollinger Bands, KDJ, OBV, VWAP**
 - Retrieves news headlines from Finnhub with rule-based sentiment scoring
 - Retrieves macro/geopolitical headlines and tags them into themes such as geopolitics, Fed or policy, tariffs, energy, and market stress
+- Builds dedicated latest-decision policy context for FED and RBA (with fallback data sources) and exposes bank-level policy bias + impact summaries
 - Aggregates analyst consensus ratings from Finnhub
 - Pulls real P/E, EPS, and market cap from Finnhub when available
+- Returns richer company business profile fields (`description`, `industry`, `employees`, `website`, `country`) for both US and ASX flows
 - Returns a rule-generated market summary compatible with the previous `llmAnalysis` response shape
 - Returns structured `MarketIntelligenceReport` with technical, fundamental, ticker-news, and macro-context data
 
@@ -200,6 +214,8 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 
 ### Skill 3: trade-recommendation
 - Scores 15+ signals: trend, RSI, sentiment, analyst consensus, momentum, **+ MACD, Bollinger Bands, KDJ, OBV, VWAP**
+- Adds event-regime overlays from a knowledge base (war/geopolitics, oil shocks, rate cycles, supply-chain disruption) mapped to sector beneficiaries/headwinds
+- Adds central-bank policy overlays (FED/RBA) into score construction with explicit policy tailwind/headwind signals when policy impact is material
 - Maps aggregate score to BUY/HOLD/SELL with confidence %
 - Computes exit levels using **14-day ATR** (more accurate than 52-week range):
   - Stop-loss = entry − (ATR14 × 1.5)
@@ -212,6 +228,8 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 - Accepts array of tickers (e.g., 5–20 stocks)
 - Fetches ticker inputs sequentially to reduce Alpha Vantage free-tier rate-limit failures
 - Computes multi-factor scores: momentum, quality, risk-adjusted
+- Applies event-regime sector tilts from the knowledge base (e.g., war, oil shock, rate cycle) to ranking and allocation bias
+- Applies central-bank policy-aware macro adjustments per ticker (FED global, RBA ASX-only) with reason strings surfaced in output
 - Constructs correlation matrix and identifies diversification gaps
 - Groups stocks by sector and ranks sector rotation opportunities
 - Assigns portfolio actions (STRONG BUY → SELL) with recommended allocations

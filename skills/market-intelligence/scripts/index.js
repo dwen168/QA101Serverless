@@ -98,7 +98,7 @@ const MACRO_THEME_RULES = [
   },
   {
     theme: 'MONETARY_POLICY',
-    keywords: ['fed', 'federal reserve', 'interest rate', 'rate cut', 'rate hike', 'powell', 'ecb', 'boj', 'inflation', 'cpi', 'pce', 'yield'],
+    keywords: ['fed', 'federal reserve', 'fomc', 'powell', 'rba', 'reserve bank of australia', 'cash rate', 'bullock'],
   },
   {
     theme: 'POLITICS_POLICY',
@@ -135,12 +135,162 @@ const SECTOR_THEME_HINTS = {
 
 function detectMacroTheme(text) {
   const lower = String(text || '').toLowerCase();
+  if (detectFedRbaPolicyMention(lower)) {
+    return 'MONETARY_POLICY';
+  }
   for (const rule of MACRO_THEME_RULES) {
     if (rule.keywords.some((keyword) => lower.includes(keyword))) {
       return rule.theme;
     }
   }
   return 'GENERAL_MACRO';
+}
+
+function detectFedRbaPolicyMention(text) {
+  const lower = String(text || '').toLowerCase();
+  if (!lower) return false;
+
+  const centralBankMentioned = [
+    'fed',
+    'federal reserve',
+    'fomc',
+    'powell',
+    'rba',
+    'reserve bank of australia',
+    'governor bullock',
+    'bullock',
+  ].some((keyword) => lower.includes(keyword));
+
+  if (!centralBankMentioned) return false;
+
+  return detectRateDecisionMention(lower);
+}
+
+function detectRateDecisionMention(text) {
+  const lower = String(text || '').toLowerCase();
+  if (!lower) return false;
+
+  return [
+    'rate decision',
+    'interest rate decision',
+    'interest rates',
+    'cash rate',
+    'policy decision',
+    'policy meeting',
+    'held rates',
+    'holds rates',
+    'held interest rates',
+    'holds interest rates',
+    'kept rates',
+    'keeps rates',
+    'keeps interest rates',
+    'left rates unchanged',
+    'left interest rates unchanged',
+    'holds interest rates steady',
+    'keeps interest rates steady',
+    'holds interest rates steady again',
+    'raises rates',
+    'raised rates',
+    'hikes rates',
+    'hiked rates',
+    'cuts rates',
+    'cut rates',
+    'rate hike',
+    'rate cut',
+    'meeting minutes',
+    'policy statement',
+  ].some((keyword) => lower.includes(keyword));
+}
+
+function detectFedMention(text) {
+  const lower = String(text || '').toLowerCase();
+  return ['fed', 'federal reserve', 'fomc', 'powell'].some((keyword) => lower.includes(keyword));
+}
+
+function detectRbaMention(text) {
+  const lower = String(text || '').toLowerCase();
+  return ['rba', 'reserve bank of australia', 'cash rate', 'bullock', 'governor bullock'].some((keyword) => lower.includes(keyword));
+}
+
+function detectRatePolicyBias(text) {
+  const lower = String(text || '').toLowerCase();
+  if (!lower) return 'WATCH';
+
+  if (['rate cut', 'cuts rates', 'cut rates', 'easing', 'dovish', 'lower rates', 'lowered rates'].some((keyword) => lower.includes(keyword))) {
+    return 'EASING';
+  }
+
+  if (['rate hike', 'hikes rates', 'hiked rates', 'raises rates', 'raised rates', 'tightening', 'hawkish', 'higher for longer'].some((keyword) => lower.includes(keyword))) {
+    return 'TIGHTENING';
+  }
+
+  if (['held rates', 'holds rates', 'held interest rates', 'holds interest rates', 'kept rates', 'keeps rates', 'keeps interest rates', 'left rates unchanged', 'left interest rates unchanged', 'holds interest rates steady', 'keeps interest rates steady', 'unchanged'].some((keyword) => lower.includes(keyword))) {
+    return 'HOLD';
+  }
+
+  return 'WATCH';
+}
+
+function summarizeRateImpact(bank, bias, sector, ticker) {
+  const tickerLabel = ticker || 'this stock';
+  const lowerSector = String(sector || '').toLowerCase();
+  const growthSensitive = ['technology', 'semiconductors', 'consumer discretionary', 'utilities', 'healthcare'].includes(lowerSector);
+  const rateSensitiveFinancials = ['financials', 'banks', 'banking', 'financial services'].includes(lowerSector);
+
+  if (bias === 'EASING') {
+    if (growthSensitive) {
+      return `${bank} easing is a tailwind for ${tickerLabel} through lower discount-rate pressure and easier liquidity.`;
+    }
+    if (rateSensitiveFinancials) {
+      return `${bank} easing can pressure net-interest-margin expectations for ${tickerLabel}, even if broader liquidity improves.`;
+    }
+    return `${bank} easing is broadly supportive for ${tickerLabel} through easier financial conditions.`;
+  }
+
+  if (bias === 'TIGHTENING') {
+    if (growthSensitive) {
+      return `${bank} tightening is a headwind for ${tickerLabel} because higher rates usually compress growth multiples.`;
+    }
+    if (rateSensitiveFinancials) {
+      return `${bank} tightening can support margin expectations for ${tickerLabel}, but it also raises credit-risk sensitivity.`;
+    }
+    return `${bank} tightening raises financing pressure and usually acts as a macro headwind for ${tickerLabel}.`;
+  }
+
+  if (bias === 'HOLD') {
+    return `${bank} holding rates steady keeps ${tickerLabel} focused on forward guidance rather than an immediate policy shock.`;
+  }
+
+  return `${bank} policy remains a live watch item for ${tickerLabel}; the current macro set does not yet show a clear directional rate signal.`;
+}
+
+function buildCentralBankImpact(bank, articles, sector, ticker) {
+  const matcher = bank === 'FED' ? detectFedMention : detectRbaMention;
+  const bankArticles = (articles || []).filter((article) => {
+    const text = `${article?.title || ''} ${article?.summary || ''}`;
+    return matcher(text) && detectRateDecisionMention(text);
+  });
+  const latestArticle = bankArticles
+    .slice()
+    .sort((left, right) => safeNumber(left?.hoursAgo, 0) - safeNumber(right?.hoursAgo, 0))[0] || null;
+  const bias = detectRatePolicyBias(`${latestArticle?.title || ''} ${latestArticle?.summary || ''}`);
+
+  return {
+    bank,
+    available: bankArticles.length > 0,
+    bias,
+    headline: latestArticle?.title || `No fresh ${bank} rate headline in current macro window.`,
+    hoursAgo: Number.isFinite(Number(latestArticle?.hoursAgo)) ? Number(latestArticle.hoursAgo) : null,
+    impact: summarizeRateImpact(bank, bias, sector, ticker),
+  };
+}
+
+function buildMonetaryPolicyContext(articles, sector, ticker, policyDecisions = {}) {
+  return {
+    available: true,
+    fed: buildCentralBankImpact('FED', policyDecisions?.fed ? [policyDecisions.fed, ...(articles || [])] : articles, sector, ticker),
+    rba: buildCentralBankImpact('RBA', policyDecisions?.rba ? [policyDecisions.rba, ...(articles || [])] : articles, sector, ticker),
+  };
 }
 
 function normalizeArticleKey(title) {
@@ -430,15 +580,15 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
     const articles = data.slice(0, 5);
     const headlines = articles.map(a => a.headline || '');
     const scores = scoreSentimentsWithRules(headlines);
-    const resolvedSources = await Promise.all(
-      articles.map((article) => resolveArticleSourceLabel(article.url || '', article.source || 'Finnhub'))
-    );
+    // Finnhub already provides source labels (e.g. "Yahoo", "Reuters") in article.source.
+    // Skip resolveArticleSourceLabel — its redirect-following takes up to 10s per article
+    // and reliably causes the outer 5s withTimeout to expire, triggering Yahoo fallback.
 
     const ruleScoredNews = articles.map((article, i) => ({
       title: article.headline || '',
       summary: (article.summary || article.description || article.lead_image || article.text || '').substring(0, 200), // Try multiple fields, cap at 200 chars
       url: article.url || '',
-      source: resolvedSources[i] || article.source || 'Finnhub',
+      source: article.source || 'Finnhub',
       sentiment: scores[i] ?? 0,
       hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
     }));
@@ -598,6 +748,46 @@ async function fetchGoogleNewsRss(ticker, companyName) {
   }
 }
 
+async function fetchGoogleNewsRssQuery(queryStr) {
+  try {
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(queryStr)}&hl=en-AU&gl=AU&ceid=AU:en`;
+    const response = await fetch(url, {
+      headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!response.ok) return [];
+
+    const xml = await response.text();
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    const titleRegex = /<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/;
+    const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
+    const linkRegex = /<link[^>]*>(.*?)<\/link>/;
+
+    const items = [];
+    let match;
+    while ((match = itemRegex.exec(xml)) !== null && items.length < 8) {
+      const block = match[1];
+      const title = (titleRegex.exec(block)?.[1] || '')
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+      const pubDate = pubDateRegex.exec(block)?.[1]?.trim() || '';
+      const link = linkRegex.exec(block)?.[1]?.trim() || '';
+      if (!title) continue;
+      const publishMs = pubDate ? Date.parse(pubDate) : 0;
+      items.push({
+        title,
+        summary: '',
+        url: link,
+        source: 'Google News',
+        sentiment: 0,
+        hoursAgo: publishMs > 0 ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000)) : 0,
+      });
+    }
+
+    return items;
+  } catch {
+    return [];
+  }
+}
+
 // Generate mock ASIC short data for resilience when real data is unavailable
 function generateMockShortData(ticker) {
   const code = ticker.split('.')[0].toUpperCase();
@@ -691,16 +881,22 @@ async function fetchNewsApiMacroNews() {
   if (!apiKey) return [];
 
   try {
-    const from = new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString();
-    const query = encodeURIComponent('((stock market OR equities OR s&p 500 OR nasdaq) AND (war OR fed OR inflation OR president OR tariff OR oil OR sanctions OR geopolitics))');
-    const url = `https://newsapi.org/v2/everything?q=${query}&language=en&sortBy=publishedAt&pageSize=8&from=${encodeURIComponent(from)}&apiKey=${apiKey}`;
+    const from = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString();
+    const query = encodeURIComponent('((fed OR "federal reserve" OR fomc OR powell OR rba OR "reserve bank of australia" OR "cash rate" OR "rate decision" OR "policy meeting" OR war OR sanctions OR geopolitics OR oil) AND (market OR markets OR equities OR asx OR stocks OR investors))');
+    const url = `https://newsapi.org/v2/everything?q=${query}&language=en&sortBy=publishedAt&pageSize=20&from=${encodeURIComponent(from)}&apiKey=${apiKey}`;
     const response = await fetch(url);
     if (!response.ok) return [];
 
     const payload = await response.json();
     if (!Array.isArray(payload.articles)) return [];
 
-    const articles = payload.articles.slice(0, 8);
+    const policyFirst = payload.articles.filter((article) =>
+      detectFedRbaPolicyMention(`${article?.title || ''} ${article?.description || ''}`)
+    );
+    const articles = dedupeArticlesByTitle([
+      ...policyFirst,
+      ...payload.articles,
+    ]).slice(0, 12);
     const scores = scoreSentimentsWithRules(articles.map((article) => article.title || ''));
     return articles.map((article, index) => ({
       title: article.title || '',
@@ -718,10 +914,128 @@ async function fetchNewsApiMacroNews() {
   }
 }
 
-function buildMacroContext({ ticker, sector, macroNews = [] }) {
-  const articles = dedupeArticlesByTitle(macroNews)
-    .sort((left, right) => (left.hoursAgo ?? 0) - (right.hoursAgo ?? 0))
-    .slice(0, 6);
+async function fetchLatestCentralBankDecision(bank) {
+  const apiKey = config.newsApiKey;
+
+  const bankConfig = bank === 'RBA'
+    ? {
+        matcher: detectRbaMention,
+        query: '(("reserve bank of australia" OR rba OR bullock OR "cash rate") AND ("rate decision" OR "cash rate" OR "held rates" OR "left rates unchanged" OR "rate hike" OR "rate cut" OR "policy meeting" OR "meeting minutes"))',
+      }
+    : {
+        matcher: detectFedMention,
+        query: '(("federal reserve" OR fed OR fomc OR powell) AND ("rate decision" OR "interest rate decision" OR "held rates" OR "left rates unchanged" OR "rate hike" OR "rate cut" OR "policy meeting" OR "meeting minutes"))',
+      };
+
+  try {
+    let article = null;
+
+    if (apiKey) {
+      const from = new Date(Date.now() - 45 * 24 * 3600 * 1000).toISOString();
+      const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(bankConfig.query)}&language=en&sortBy=publishedAt&pageSize=12&from=${encodeURIComponent(from)}&apiKey=${apiKey}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const payload = await response.json();
+        if (Array.isArray(payload.articles)) {
+          article = payload.articles.find((item) => {
+            const text = `${item?.title || ''} ${item?.description || ''}`;
+            return bankConfig.matcher(text) && detectRateDecisionMention(text);
+          }) || null;
+        }
+      }
+    }
+
+    if (!article) {
+      const googleQuery = bank === 'RBA'
+        ? 'RBA cash rate decision'
+        : 'Federal Reserve rate decision';
+      const googleItems = await fetchGoogleNewsRssQuery(googleQuery);
+      const googleArticle = googleItems.find((item) => {
+        const text = `${item?.title || ''} ${item?.summary || ''}`;
+        return bankConfig.matcher(text) && detectRateDecisionMention(text);
+      });
+
+      if (!googleArticle) return null;
+
+      return {
+        ...googleArticle,
+        theme: 'MONETARY_POLICY',
+        scope: 'macro',
+        bank,
+        bias: detectRatePolicyBias(`${googleArticle.title || ''} ${googleArticle.summary || ''}`),
+      };
+    }
+
+    return {
+      title: article.title || `${bank} latest rate decision`,
+      summary: article.description || article.content || '',
+      url: article.url || '',
+      source: article.source?.name || 'NewsAPI',
+      sentiment: 0,
+      hoursAgo: hoursAgoFromDate(article.publishedAt),
+      theme: 'MONETARY_POLICY',
+      scope: 'macro',
+      bank,
+      bias: detectRatePolicyBias(`${article.title || ''} ${article.description || ''}`),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function ensureMonetaryPolicyCoverage(macroNews = [], ticker = '') {
+  const news = Array.isArray(macroNews) ? macroNews.filter(Boolean) : [];
+
+  const normalizedNews = news.map((article) => {
+    const text = `${article?.title || ''} ${article?.summary || ''}`;
+    if (String(article?.theme || '').toUpperCase() === 'MONETARY_POLICY' || detectFedRbaPolicyMention(text)) {
+      return {
+        ...article,
+        theme: 'MONETARY_POLICY',
+      };
+    }
+    return article;
+  });
+
+  const hasMonetary = normalizedNews.some((article) => String(article?.theme || '').toUpperCase() === 'MONETARY_POLICY');
+  if (hasMonetary) {
+    return normalizedNews;
+  }
+
+  const symbol = String(ticker || '').toUpperCase() || 'MARKET';
+  return [
+    ...normalizedNews,
+    {
+      title: `${symbol} policy watch: FED/RBA focus (no FED/RBA decision headline found in fetched window)`,
+      summary: 'Monetary policy monitoring remains anchored to Federal Reserve and Reserve Bank of Australia signals.',
+      url: '',
+      source: 'System Policy Overlay',
+      sentiment: 0,
+      hoursAgo: 0,
+      theme: 'MONETARY_POLICY',
+      scope: 'macro',
+      synthetic: true,
+    },
+  ];
+}
+
+function buildMacroContext({ ticker, sector, macroNews = [], policyDecisions = {} }) {
+  const coverageNews = ensureMonetaryPolicyCoverage(macroNews, ticker);
+  const sortedCoverageNews = dedupeArticlesByTitle(coverageNews)
+    .sort((left, right) => (left.hoursAgo ?? 0) - (right.hoursAgo ?? 0));
+
+  let articles = sortedCoverageNews.slice(0, 6);
+  const latestMonetaryArticle = sortedCoverageNews.find(
+    (article) => String(article?.theme || '').toUpperCase() === 'MONETARY_POLICY'
+  );
+
+  if (
+    latestMonetaryArticle
+    && !articles.some((article) => String(article?.theme || '').toUpperCase() === 'MONETARY_POLICY')
+  ) {
+    articles = dedupeArticlesByTitle([latestMonetaryArticle, ...articles]).slice(0, 6);
+  }
+
   const score = parseFloat(average(articles.map((article) => safeNumber(article.sentiment))).toFixed(2));
   const sentimentLabel = score > 0.25 ? 'RISK_ON' : score < -0.25 ? 'RISK_OFF' : 'BALANCED';
 
@@ -731,10 +1045,18 @@ function buildMacroContext({ ticker, sector, macroNews = [] }) {
     return accumulator;
   }, {});
 
-  const dominantThemes = Object.entries(themeCounts)
+  let dominantThemes = Object.entries(themeCounts)
     .sort((left, right) => right[1] - left[1])
     .slice(0, 3)
     .map(([theme, count]) => ({ theme, count }));
+
+  const monetaryCount = safeNumber(themeCounts.MONETARY_POLICY, 0);
+  if (monetaryCount > 0 && !dominantThemes.some((item) => item.theme === 'MONETARY_POLICY')) {
+    dominantThemes = [
+      { theme: 'MONETARY_POLICY', count: monetaryCount },
+      ...dominantThemes,
+    ].slice(0, 3);
+  }
 
   const primaryTheme = dominantThemes[0]?.theme || 'GENERAL_MACRO';
   const riskLevel = sentimentLabel === 'RISK_OFF' || ['GEOPOLITICS', 'MARKET_STRESS'].includes(primaryTheme)
@@ -749,6 +1071,7 @@ function buildMacroContext({ ticker, sector, macroNews = [] }) {
     : 'Macro feed unavailable; current view relies on ticker-specific news only.';
 
   const impactNotes = dominantThemes.map((item) => summarizeThemeImpact(item.theme, sector, ticker));
+  const monetaryPolicy = buildMonetaryPolicyContext(articles, sector, ticker, policyDecisions);
 
   return {
     available: articles.length > 0,
@@ -758,6 +1081,7 @@ function buildMacroContext({ ticker, sector, macroNews = [] }) {
     dominantThemes,
     marketContext,
     impactNotes,
+    monetaryPolicy,
     news: articles,
     sourceBreakdown: {
       articleCount: articles.length,
@@ -810,9 +1134,34 @@ async function fetchFinnhubProfile(ticker) {
       name: data.name || '',
       sector: data.finnhubIndustry || data.industry || '',
       marketCap: safeNumber(data.marketCapitalization) * 1e6 || 0,
+      country: data.country || null,
+      weburl: data.weburl || null,
     };
   } catch (error) {
     console.error('Finnhub profile fetch failed:', error.message);
+    return null;
+  }
+}
+
+// Fetch company description/industry/employees from Yahoo Finance summaryProfile
+// Used as a supplement for the Finnhub path where profile2 lacks these fields
+async function fetchYahooSummaryProfile(ticker) {
+  try {
+    const yf = getYahooFinance();
+    const summary = await withTimeout(
+      yf.quoteSummary(ticker, { modules: ['summaryProfile', 'assetProfile'] }),
+      ENRICHMENT_TIMEOUT_MS,
+      `Yahoo summaryProfile fetch for ${ticker}`
+    );
+    const sp = summary?.summaryProfile || summary?.assetProfile || {};
+    return {
+      description: (sp.longBusinessSummary || '').substring(0, 500) || null,
+      industry: sp.industry || null,
+      employees: sp.fullTimeEmployees || null,
+      website: sp.website || null,
+      country: sp.country || null,
+    };
+  } catch {
     return null;
   }
 }
@@ -932,17 +1281,19 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     throw new Error('FINNHUB_API_KEY is missing');
   }
 
-  const [quoteResult, profileResult, metricsResult, candlesResult, recommendationsResult, priceTargetResult] = await Promise.allSettled([
+  const [quoteResult, profileResult, metricsResult, candlesResult, recommendationsResult, priceTargetResult, yahooProfileResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubQuote(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub quote fetch for ${ticker}`),
     withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
     withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
     withTimeout(fetchFinnhubCandles(ticker), REAL_DATA_TIMEOUT_MS, `Finnhub candles fetch for ${ticker}`),
     withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
     withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
+    withTimeout(fetchYahooSummaryProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Yahoo summary profile for ${ticker}`),
   ]);
 
   const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
   const profile = profileResult.status === 'fulfilled' ? profileResult.value : null;
+  const yahooProfile = yahooProfileResult?.status === 'fulfilled' ? yahooProfileResult.value : null;
   const metrics = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
   let priceHistory = candlesResult.status === 'fulfilled' ? candlesResult.value : null;
   const recommendations = recommendationsResult.status === 'fulfilled' ? recommendationsResult.value : null;
@@ -1013,18 +1364,41 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
   const companyName = profile?.name || `${ticker} Corp.`;
   const sector = profile?.sector || 'Unknown';
 
-  const [companyNewsResult, finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+  const [companyNewsResult, finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubNews(ticker, {
       sector,
       companyName,
     }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
     withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
     withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+    withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
+    withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
   ]);
 
-  const companyNews = companyNewsResult.status === 'fulfilled' ? companyNewsResult.value : [];
+  let companyNews = companyNewsResult.status === 'fulfilled' ? companyNewsResult.value : [];
+  let companyNewsSource = 'finnhub';
+
+  if (!Array.isArray(companyNews) || companyNews.length === 0) {
+    const yahooFallbackNews = await fetchYahooCompanyNewsFallback(
+      ticker,
+      { companyName, sector },
+      dependencies
+    );
+    if (Array.isArray(yahooFallbackNews) && yahooFallbackNews.length > 0) {
+      companyNews = yahooFallbackNews;
+      companyNewsSource = 'yahoo-fallback';
+    } else {
+      companyNews = [];
+      companyNewsSource = 'none';
+    }
+  }
+
   const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
   const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+  const policyDecisions = {
+    fed: fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null,
+    rba: rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null,
+  };
   const macroNews = await scoreMacroNewsWithLlm(
     [...finnhubMacroNews, ...newsApiMacroNews],
     { ticker, sector },
@@ -1070,6 +1444,11 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     high52w: parseFloat(Math.max(...highs).toFixed(2)),
     low52w: parseFloat(Math.min(...lows).toFixed(2)),
     marketCap: profile?.marketCap || 0,
+    description: yahooProfile?.description || null,
+    industry: yahooProfile?.industry || null,
+    employees: yahooProfile?.employees || null,
+    website: yahooProfile?.website || profile?.weburl || null,
+    country: yahooProfile?.country || profile?.country || null,
     pe: metrics?.pe || 0,
     eps: metrics?.eps || 0,
     ma20: parseFloat(ma20.toFixed(2)),
@@ -1091,6 +1470,7 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       ticker,
       sector,
       macroNews,
+      policyDecisions,
     }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
@@ -1113,7 +1493,11 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
         : priceHistorySource === 'yahoo-finance-history'
           ? 'Yahoo Finance (Real fallback)'
           : 'Alpha Vantage (Real fallback)',
-      news: Array.isArray(companyNews) && companyNews.length > 0 ? 'Finnhub (Real)' : 'No news found',
+      news: companyNewsSource === 'finnhub'
+        ? 'Finnhub (Real)'
+        : companyNewsSource === 'yahoo-fallback'
+          ? 'Yahoo Finance (Real fallback)'
+          : 'No news found',
       macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
     },
     finnhubData: {
@@ -1140,6 +1524,68 @@ function getYahooFinance() {
     _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
   }
   return _yf;
+}
+
+async function fetchYahooCompanyNewsFallback(ticker, { companyName = '', sector = 'Unknown' } = {}, dependencies = {}) {
+  try {
+    const yf = getYahooFinance();
+    const searchResult = await withTimeout(
+      yf.search(ticker, { newsCount: 8, quotesCount: 0 }),
+      ENRICHMENT_TIMEOUT_MS,
+      `Yahoo company news fallback for ${ticker}`
+    );
+
+    const yahooItems = Array.isArray(searchResult?.news) ? searchResult.news.slice(0, 8) : [];
+    if (!yahooItems.length) {
+      return [];
+    }
+
+    const scores = scoreSentimentsWithRules(yahooItems.map((item) => item.title || ''));
+    const baseNews = yahooItems.map((item, index) => {
+      const ts = item.providerPublishTime;
+      let publishMs = 0;
+      if (typeof ts === 'number') {
+        publishMs = ts > 1e12 ? ts : ts * 1000;
+      } else if (typeof ts === 'string') {
+        if (/^\d+$/.test(ts)) {
+          const numericTs = Number(ts);
+          publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
+        } else {
+          publishMs = Date.parse(ts);
+        }
+      }
+
+      return {
+        title: item.title || '',
+        summary: (item.summary || item.description || '').substring(0, 200),
+        sentiment: scores[index] ?? 0,
+        source: 'Yahoo Finance',
+        url: item.link || item.clickThroughUrl?.url || '',
+        hoursAgo: Number.isFinite(publishMs) && publishMs > 0
+          ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000))
+          : 0,
+      };
+    });
+
+    const llmCandidates = baseNews.slice(0, 6);
+    if (llmCandidates.length === 0) {
+      return baseNews;
+    }
+
+    const llmScored = await scoreCompanyNewsWithLlm(
+      llmCandidates,
+      {
+        ticker,
+        sector,
+        companyName: companyName || ticker,
+      },
+      dependencies
+    );
+
+    return baseNews.map((article) => llmScored.find((item) => item.title === article.title) || article);
+  } catch {
+    return [];
+  }
 }
 
 async function fetchYahooFinancePriceHistory(ticker, lookbackDays = 730) {
@@ -1251,7 +1697,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const isAsx = ticker.toUpperCase().endsWith('.AX');
   
   // parallelize company news, macro news, and ASX short metrics
-  const [yahooNews, macroNews, shortMetrics] = await Promise.all([
+  const [yahooNews, macroNews, shortMetrics, fedDecision, rbaDecision] = await Promise.all([
     (async () => {
       try {
         const companyName = priceMod.longName || priceMod.shortName || ticker;
@@ -1382,6 +1828,20 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
         };
       }
     })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
   ]);
   perfMs.newsTotal = Date.now() - startNews;
 
@@ -1398,9 +1858,14 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   return {
     ticker,
     name: priceMod.longName || priceMod.shortName || `${ticker}`,
+    description: (sp.longBusinessSummary || '').substring(0, 500) || null,
     sector: sp.sector || sp.industry || 'Unknown',
+    industry: sp.industry || null,
     currency: priceMod.currency || 'USD',
     exchange: priceMod.exchangeName || '',
+    employees: sp.fullTimeEmployees || null,
+    website: sp.website || null,
+    country: sp.country || null,
     price: parseFloat(price.toFixed(4)),
     prevClose: parseFloat(prevClose.toFixed(4)),
     change: parseFloat(change.toFixed(4)),
@@ -1436,6 +1901,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       ticker,
       sector: sp.sector || sp.industry || 'Unknown',
       macroNews,
+      policyDecisions: { fed: fedDecision, rba: rbaDecision },
     }),
     priceHistory,
     priceHistorySource: 'yahoo-finance-history',
@@ -1677,6 +2143,8 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
 
   let finnhubMacroNews = [];
   let newsApiMacroNews = [];
+  let fedDecision = null;
+  let rbaDecision = null;
 
   if (config.finnhubApiKey) {
     const enrichmentResults = await Promise.allSettled([
@@ -1690,6 +2158,8 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
       withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
       withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+      withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
+      withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
     ]);
 
     finnhubProfile = enrichmentResults[0].status === 'fulfilled' ? enrichmentResults[0].value : null;
@@ -1699,13 +2169,19 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     finnhubPriceTarget = enrichmentResults[4].status === 'fulfilled' ? enrichmentResults[4].value : null;
     finnhubMacroNews = enrichmentResults[5].status === 'fulfilled' ? enrichmentResults[5].value : [];
     newsApiMacroNews = enrichmentResults[6].status === 'fulfilled' ? enrichmentResults[6].value : [];
+    fedDecision = enrichmentResults[7].status === 'fulfilled' ? enrichmentResults[7].value : null;
+    rbaDecision = enrichmentResults[8].status === 'fulfilled' ? enrichmentResults[8].value : null;
   } else {
-    const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+    const [finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
       withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
       withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+      withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
+      withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
     ]);
     finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
     newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+    fedDecision = fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null;
+    rbaDecision = rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null;
   }
 
   // Use Finnhub data if available, otherwise use fallbacks
@@ -1784,6 +2260,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       ticker,
       sector,
       macroNews,
+      policyDecisions: { fed: fedDecision, rba: rbaDecision },
     }),
     priceHistory,
     priceHistorySource: 'alpha-vantage-history',
