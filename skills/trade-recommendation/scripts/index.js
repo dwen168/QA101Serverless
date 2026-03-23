@@ -8,6 +8,7 @@ const { normalizeTimeHorizon, getRecommendationProfile, buildObjectiveLensSummar
 const { computeConfidence, generateConfidenceExplanation } = require('./modules/confidence');
 const { findHistoricalPatterns } = require('./modules/historical');
 const { scoreSignals } = require('./modules/scoring');
+const { buildDecisionTree } = require('./modules/decision-tree');
 
 const skills = loadSkills();
 
@@ -103,6 +104,20 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
   // Historical pattern matching
   const historicalPatterns = findHistoricalPatterns(marketData.priceHistory, marketData);
   const objectiveLens = buildObjectiveLensSummary(signals, profile);
+  const macroOverlay = {
+    available: !!marketData?.macroContext?.available,
+    riskLevel: marketData?.macroContext?.riskLevel || 'UNKNOWN',
+    sentimentLabel: marketData?.macroContext?.sentimentLabel || 'UNKNOWN',
+    dominantThemes: (marketData?.macroContext?.dominantThemes || []).slice(0, 3),
+  };
+  const decisionTree = buildDecisionTree({
+    score,
+    signals,
+    confidence,
+    action,
+    macroOverlay,
+    eventRegimeOverlay,
+  });
 
   // Get weights metadata for transparency
   const weightsMetadata = getWeightsMetadata();
@@ -129,14 +144,10 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
         amplifiedSignals: objectiveLens.amplifiedSignals,
         deemphasizedSignals: objectiveLens.deemphasizedSignals,
       },
-      macroOverlay: {
-        available: !!marketData?.macroContext?.available,
-        riskLevel: marketData?.macroContext?.riskLevel || 'UNKNOWN',
-        sentimentLabel: marketData?.macroContext?.sentimentLabel || 'UNKNOWN',
-        dominantThemes: (marketData?.macroContext?.dominantThemes || []).slice(0, 3),
-      },
+      macroOverlay,
       policyOverlay,
       eventRegimeOverlay,
+      decisionTree,
       edaOverlay: {
         available: !!edaInsights?.edaFactors?.available,
         factors: edaInsights?.edaFactors || null,

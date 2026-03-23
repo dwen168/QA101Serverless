@@ -1204,6 +1204,45 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     `).join('')}
   `;
   panel.appendChild(newsCard);
+
+  // Macro Anchors
+  if (d.macroAnchors && d.macroAnchors.length > 0) {
+    const anchorsCard = document.createElement('div');
+    anchorsCard.className = 'card fade-in';
+    anchorsCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Macro Anchors (3-Month Trend)</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px">
+        ${d.macroAnchors.map(a => {
+          const validHistory = a.history ? a.history.slice(-30).map(h => h.close).filter(v => typeof v === 'number' && v > 0) : [];
+          const min = validHistory.length ? Math.min(...validHistory) : 0;
+          const max = validHistory.length ? Math.max(...validHistory) : 1;
+          const range = max - min || 1;
+          const isUp = a.changePercent >= 0;
+          
+          return `
+          <div style="padding:10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <div style="font-size:12px;font-weight:600;color:var(--cyan)">${a.name}</div>
+                <div style="font-size:10px;color:var(--text3);font-family:var(--mono)">${a.ticker}</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:12px;font-family:var(--mono);color:${isUp ? 'var(--green)' : 'var(--red)'}">${isUp ? '+' : ''}${(a.changePercent || 0).toFixed(2)}%</div>
+                <div style="font-size:10px;font-family:var(--mono);color:var(--text3)">${a.trend || 'NEUTRAL'}</div>
+              </div>
+            </div>
+            <div style="height:30px;margin-top:12px;display:flex;align-items:flex-end;gap:1px;opacity:0.8">
+              ${validHistory.map(val => `
+                <div style="flex:1;background:${isUp ? 'var(--green)' : 'var(--red)'};height:${Math.max(5, ((val - min) / range) * 100)}%;border-radius:1px 1px 0 0"></div>
+              `).join('')}
+            </div>
+          </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+    panel.appendChild(anchorsCard);
+  }
 }
 
 // ─────────────────────────────────────────
@@ -1495,6 +1534,120 @@ function renderEDA(charts, edaInsights, marketData, panel) {
 // RENDER: Recommendation
 // ─────────────────────────────────────────
 function renderRecommendation(rec, panel) {
+  const renderDecisionTreeHtml = (tree) => {
+    if (!tree || !Array.isArray(tree.pillars) || tree.pillars.length === 0) return '';
+
+    const leaf = tree.leaf || {};
+
+    // ── Colour helpers ────────────────────────────────────────────────────────
+    // For regular pillars: bullish=green, bearish=red, neutral=amber
+    const pillarPalette = (outcome) => {
+      if (outcome === 'bullish') return { color: 'var(--green)', border: 'rgba(16,185,129,0.25)', bg: 'rgba(16,185,129,0.07)', chip: 'BULLISH' };
+      if (outcome === 'bearish') return { color: 'var(--red)',   border: 'rgba(239,68,68,0.25)',  bg: 'rgba(239,68,68,0.07)',  chip: 'BEARISH' };
+      return { color: 'var(--amber)', border: 'rgba(245,158,11,0.25)', bg: 'rgba(245,158,11,0.07)', chip: 'NEUTRAL' };
+    };
+    // For Risk Penalty: low=green, moderate=amber, high=red
+    const riskPalette = (outcome) => {
+      if (outcome === 'low')      return { color: 'var(--green)', border: 'rgba(16,185,129,0.25)', bg: 'rgba(16,185,129,0.07)', chip: 'LOW RISK' };
+      if (outcome === 'high')     return { color: 'var(--red)',   border: 'rgba(239,68,68,0.25)',  bg: 'rgba(239,68,68,0.07)',  chip: 'HIGH RISK' };
+      return { color: 'var(--amber)', border: 'rgba(245,158,11,0.25)', bg: 'rgba(245,158,11,0.07)', chip: 'MOD RISK' };
+    };
+
+    // ── Contribution bar (centred, extends left or right) ─────────────────────
+    const contributionBar = (netScore, maxAbsScore = 10) => {
+      const capped = Math.min(Math.abs(netScore), maxAbsScore);
+      const pct = (capped / maxAbsScore) * 50;   // max 50% each side
+      const bullish = netScore >= 0;
+      const fillColor = bullish ? 'rgba(16,185,129,0.65)' : 'rgba(239,68,68,0.65)';
+      const leftPct  = bullish ? 50 : 50 - pct;
+      const widthPct = pct;
+      return `
+        <div style="position:relative;height:6px;border-radius:999px;background:rgba(255,255,255,0.06);margin:8px 0 4px;overflow:hidden">
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(157,179,212,0.4)"></div>
+          <div style="position:absolute;top:0;bottom:0;left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%;background:${fillColor};border-radius:999px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--text3);letter-spacing:0.05em"><span>Bearish</span><span>Neutral</span><span>Bullish</span></div>
+      `;
+    };
+
+    // ── Risk pressure bar (0–100% drag) ──────────────────────────────────────
+    const riskPressureBar = (pct) => {
+      const fillColor = pct > 50 ? 'rgba(239,68,68,0.65)' : pct > 28 ? 'rgba(245,158,11,0.65)' : 'rgba(16,185,129,0.65)';
+      return `
+        <div style="position:relative;height:6px;border-radius:999px;background:rgba(255,255,255,0.06);margin:8px 0 4px;overflow:hidden">
+          <div style="position:absolute;top:0;bottom:0;left:0;width:${pct.toFixed(1)}%;background:${fillColor};border-radius:999px"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--mono);color:var(--text3);letter-spacing:0.05em"><span>0%</span><span>Risk pressure</span><span>100%</span></div>
+      `;
+    };
+
+    // ── Signal evidence row ───────────────────────────────────────────────────
+    const signalRow = (signal) => {
+      const pts = Number(signal.points || 0);
+      const ptsColor = pts > 0 ? 'var(--green)' : pts < 0 ? 'var(--red)' : 'var(--amber)';
+      return `
+        <div style="padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.03);display:flex;gap:8px;align-items:flex-start">
+          <span style="font-family:var(--mono);font-size:12px;font-weight:700;color:${ptsColor};min-width:32px;text-align:right;flex-shrink:0">${pts > 0 ? '+' : ''}${pts}</span>
+          <div style="min-width:0">
+            <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${signal.name}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px;line-height:1.4">${signal.reason}</div>
+          </div>
+        </div>
+      `;
+    };
+
+    // ── Render each pillar card ────────────────────────────────────────────────
+    const pillarCards = tree.pillars.map((pillar) => {
+      const isRisk = !!pillar.inverse;
+      const palette   = isRisk ? riskPalette(pillar.outcome) : pillarPalette(pillar.outcome);
+      const topSignals = Array.isArray(pillar.topSignals) ? pillar.topSignals : [];
+      const evidenceId = `factor-evidence-${String(pillar.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+      const scoreLabel = isRisk
+        ? `${pillar.riskPressurePct ?? 0}% drag`
+        : `${pillar.netScore >= 0 ? '+' : ''}${pillar.netScore} pts`;
+
+      const barHtml = isRisk
+        ? riskPressureBar(pillar.riskPressurePct ?? 0)
+        : contributionBar(pillar.netScore);
+
+      return `
+        <div style="padding:11px 13px;border-radius:11px;border:1px solid ${palette.border};background:${palette.bg}">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-size:12px;font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:${palette.color}">${pillar.label}</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-size:12px;font-family:var(--mono);font-weight:700;color:${palette.color}">${scoreLabel}</span>
+              <span style="padding:2px 6px;border-radius:999px;border:1px solid ${palette.border};font-size:9px;font-family:var(--mono);color:${palette.color}">${palette.chip}</span>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--text2);margin-top:5px;line-height:1.45">${pillar.description}</div>
+          ${barHtml}
+          ${topSignals.length ? `
+            <div style="margin-top:8px">
+              <button type="button" class="tree-evidence-toggle" data-target="${evidenceId}" aria-expanded="false" style="cursor:pointer;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Show signals (${topSignals.length})</button>
+              <div id="${evidenceId}" class="tree-evidence-body" style="display:none;margin-top:8px;flex-direction:column;gap:6px">
+                ${topSignals.map(signalRow).join('')}
+              </div>
+            </div>
+          ` : `<div style="margin-top:6px;font-size:11px;color:var(--text3)">No signals in this category.</div>`}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div style="margin-top:16px;padding:12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.02)">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <div style="font-size:13px;color:var(--cyan);font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:0.1em">Factor Contribution</div>
+          <span class="detail-chip">${leaf.action || rec.action} · ${leaf.confidence ?? rec.confidence}% confidence</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${pillarCards}
+        </div>
+        ${leaf.summary ? `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--text2);line-height:1.5">${leaf.summary}</div>` : ''}
+      </div>
+    `;
+  };
+
   const div2 = document.createElement('div');
   div2.className = 'section-divider fade-in';
   div2.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">③ trade-recommendation</span><div class="section-divider-line"></div>`;
@@ -1627,6 +1780,7 @@ function renderRecommendation(rec, panel) {
       </div>
     ` : ''}
     ${rec.rationale ? `<p style="font-size:13px;line-height:1.6;color:var(--text2);margin-top:14px">${rec.rationale}</p>` : ''}
+    ${renderDecisionTreeHtml(rec.decisionTree)}
 
     <div style="margin-top:16px">
       <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">Signal Breakdown</div>
@@ -1666,6 +1820,23 @@ function renderRecommendation(rec, panel) {
     <div class="disclaimer">${rec.disclaimer}</div>
   `;
   panel.appendChild(recCard);
+
+  recCard.addEventListener('click', (event) => {
+    const toggle = event.target.closest('.tree-evidence-toggle');
+    if (!toggle) return;
+
+    const targetId = toggle.getAttribute('data-target');
+    const target = recCard.querySelector(`#${targetId}`);
+    if (!target) return;
+
+    const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+    toggle.setAttribute('aria-expanded', isExpanded ? 'false' : 'true');
+    const txt = String(toggle.textContent || '');
+    toggle.textContent = isExpanded
+      ? txt.replace('Hide', 'Show')
+      : txt.replace('Show', 'Hide');
+    target.style.display = isExpanded ? 'none' : 'flex';
+  });
 
   // Historical Patterns card
   const hp = rec.historicalPatterns;
@@ -1753,6 +1924,16 @@ function toggleExportMenu(event) {
 
 function closeExportMenu() {
   document.getElementById('export-dropdown')?.classList.remove('open');
+}
+
+function toggleInfoMenu(event) {
+  event.stopPropagation();
+  const dropdown = document.getElementById('info-dropdown');
+  dropdown.classList.toggle('open');
+}
+
+function closeInfoMenu() {
+  document.getElementById('info-dropdown')?.classList.remove('open');
 }
 
 function hasExportableContent() {
@@ -1936,3 +2117,4 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
 
 initializeLlmConfig();
 document.addEventListener('click', closeExportMenu);
+document.addEventListener('click', closeInfoMenu);

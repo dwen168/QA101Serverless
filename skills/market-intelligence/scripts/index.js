@@ -1,6 +1,7 @@
 const { normalizeTicker } = require('../../../backend/lib/utils');
 const { generateMockMarketData } = require('./modules/mock');
 const { fetchYahooFinanceData, fetchFinnhubMarketData, fetchAlphaVantageMarketData } = require('./modules/market-data');
+const { fetchMacroAnchors } = require('./modules/macro-anchors');
 const { scoreCompanyNewsWithLlm, scoreMacroNewsWithLlm } = require('./modules/sentiment');
 const { detectFedRbaPolicyMention } = require('./modules/macro');
 
@@ -36,6 +37,11 @@ async function runMarketIntelligence({ ticker }, dependencies = {}) {
     marketData = generateMockMarketData(cleanTicker);
     marketData.fallbackReason = error && error.message ? error.message : 'Live market API failed';
   }
+  
+  if (marketData && !marketData.macroAnchors) {
+    marketData.macroAnchors = await fetchMacroAnchors();
+  }
+
   return {
     marketData,
     llmAnalysis: buildFallbackAnalysis(cleanTicker, marketData),

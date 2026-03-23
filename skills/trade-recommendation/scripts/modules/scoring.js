@@ -203,6 +203,46 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     }
   }
 
+  // Macro Anchors Confirmation (Cross-Asset Validation)
+  if (marketData.macroAnchors && Array.isArray(marketData.macroAnchors)) {
+    const getAnchor = (t) => marketData.macroAnchors.find(a => a.ticker === t);
+    const oil = getAnchor('CL=F');
+    const vix = getAnchor('^VIX');
+    const tnx = getAnchor('^TNX');
+    const sector = String(marketData.sector || 'Unknown');
+
+    // Energy requires oil confirmation
+    if (sector === 'Energy' && oil) {
+      if (oil.trend === 'BULLISH') {
+        add('Macro Anchor: Oil Rally', macroWeight('macro_risk_bullish', 1), 'Crude oil trend is bullish, supporting Energy equities.', [
+          { label: 'CL=F', value: `+${fmt(oil.changePercent)}%` }
+        ], 'macro');
+      } else if (oil.trend === 'BEARISH') {
+        add('Macro Anchor: Oil Weakness', macroWeight('macro_sector_headwind', -1), 'Crude oil trend is bearish, creating a fundamental headwind for Energy.', [
+          { label: 'CL=F', value: `${fmt(oil.changePercent)}%` }
+        ], 'macro');
+      }
+    }
+
+    // Technology / Real Estate are sensitive to rates
+    if (['Technology', 'Real Estate'].includes(sector) && tnx) {
+      if (tnx.trend === 'BULLISH' && tnx.changePercent > 10) {
+        add('Macro Anchor: Rising Yields', macroWeight('macro_sector_headwind', -1), '10Y Treasury yields are rising strongly, a headwind for growth and duration-sensitive sectors.', [
+          { label: '^TNX', value: `+${fmt(tnx.changePercent)}%` }
+        ], 'macro');
+      }
+    }
+
+    // VIX as a global risk-off signal (VIX spiking > 10% over the period)
+    if (vix && vix.trend === 'BULLISH' && vix.changePercent > 10) {
+      if (!['Utilities', 'Consumer Defensive'].includes(sector)) {
+        add('Macro Anchor: Volatility Spiking', macroWeight('macro_risk_bearish', -1.5), 'VIX has spiked > 10%, indicating elevated systemic market stress and broader risk-off flows.', [
+          { label: '^VIX', value: `+${fmt(vix.changePercent)}%` }
+        ], 'macro');
+      }
+    }
+  }
+
   // Event-regime knowledge base overlay (war/oil shock/rate cycle/supply chain, etc.)
   if (eventRegimeOverlay.available && Math.abs(eventRegimeOverlay.netBias) >= 0.25) {
     const magnitude = Math.min(2, Math.max(0.5, Math.abs(eventRegimeOverlay.netBias)));
