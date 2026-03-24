@@ -253,6 +253,51 @@ async function fetchFinnhubPriceTarget(ticker) {
   }
 }
 
+async function fetchFinnhubEarningsSurprise(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return [];
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/earnings?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+    
+    // Sort descending by period, take last 4 quarters
+    return data.sort((a, b) => new Date(b.period) - new Date(a.period)).slice(0, 4).map(e => ({
+      period: e.period,
+      actual: safeNumber(e.actual),
+      estimate: safeNumber(e.estimate),
+      surprise: safeNumber(e.surprise),
+      surprisePercent: safeNumber(e.surprisePercent)
+    }));
+  } catch (error) {
+    console.error('Finnhub earnings surprise fetch failed:', error.message);
+    return [];
+  }
+}
+
+async function fetchFinnhubPeers(ticker) {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return [];
+
+  try {
+    const url = `https://finnhub.io/api/v1/stock/peers?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+    
+    return data.filter(p => p !== ticker).slice(0, 5);
+  } catch (error) {
+    console.error('Finnhub peers fetch failed:', error.message);
+    return [];
+  }
+}
+
 module.exports = {
   fetchFinnhubNews,
   fetchFinnhubMacroNews,
@@ -262,4 +307,6 @@ module.exports = {
   fetchFinnhubCandles,
   fetchFinnhubMetrics,
   fetchFinnhubPriceTarget,
+  fetchFinnhubEarningsSurprise,
+  fetchFinnhubPeers,
 };

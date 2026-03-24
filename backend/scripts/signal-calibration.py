@@ -70,7 +70,8 @@ def fetch_alpha_vantage_data(symbol, api_key, days=500):
             return None
         
         records = []
-        for date_str, vals in list(time_series.items())[:days]:
+        all_items: list = list(time_series.items())
+        for date_str, vals in all_items[:days]:
             records.append({
                 'date': pd.to_datetime(date_str),
                 'open': float(vals['1. open']),
@@ -151,6 +152,104 @@ def fetch_yfinance_data(symbol, days=500):
         return None
 
 
+def fetch_fundamental_features(symbol):
+    """
+    Fetch quarterly fundamental data from Yahoo Finance:
+    - Return on Equity (ROE)
+    - Free Cash Flow (FCF)
+    - Earnings Surprise % (actual vs estimate)
+    - Net Insider Shares (buys minus sells over trailing 6 months)
+
+    Returns a dict of {date_str: {feature: value}} for forward-filling onto the
+    daily price DataFrame, or None if data is unavailable.
+    """
+    if not YF_AVAILABLE:
+        return None
+
+    print(f"  Fetching fundamentals for {symbol}...", end=" ", flush=True)
+    try:
+        ticker = yf.Ticker(symbol)
+
+        # --- ROE: net_income / shareholders_equity ---
+        roe_series = {}
+        try:
+            income = ticker.quarterly_income_stmt
+            balance = ticker.quarterly_balance_sheet
+            if income is not None and balance is not None and not income.empty and not balance.empty:
+                for col in income.columns:
+                    ni_row = 'Net Income' if 'Net Income' in income.index else None
+                    eq_row = 'Stockholders Equity' if 'Stockholders Equity' in balance.index else ('Common Stock Equity' if 'Common Stock Equity' in balance.index else None)
+                    if ni_row and eq_row and col in balance.columns:
+                        ni = income.loc[ni_row, col]
+                        eq = balance.loc[eq_row, col]
+                        if pd.notna(ni) and pd.notna(eq) and abs(float(eq)) > 1e6:
+                            roe_series[col] = float(ni) / float(eq)
+        except Exception:
+            pass
+
+        # --- FCF: operating cash flow - capex ---
+        fcf_series = {}
+        try:
+            cashflow = ticker.quarterly_cashflow
+            if cashflow is not None and not cashflow.empty:
+                for col in cashflow.columns:
+                    opcf_row = 'Operating Cash Flow' if 'Operating Cash Flow' in cashflow.index else None
+                    capex_row = 'Capital Expenditure' if 'Capital Expenditure' in cashflow.index else None
+                    if opcf_row:
+                        opcf = cashflow.loc[opcf_row, col]
+                        capex = cashflow.loc[capex_row, col] if capex_row else 0
+                        if pd.notna(opcf):
+                            fcf_series[col] = float(opcf) - float(capex if pd.notna(capex) else 0)
+        except Exception:
+            pass
+
+        # --- Earnings Surprise % ---
+        eps_surprise_series = {}
+        try:
+            earnings = ticker.earnings_history
+            if earnings is not None and not earnings.empty:
+                for _, row in earnings.iterrows():
+                    period = row.get('quarter') or row.get('date')
+                    actual = row.get('epsActual') or row.get('Reported EPS')
+                    estimate = row.get('epsEstimate') or row.get('EPS Estimate')
+                    if period is not None and actual is not None and estimate is not None:
+                        try:
+                            surp = (float(actual) - float(estimate)) / (abs(float(estimate)) + 1e-9)
+                            eps_surprise_series[pd.Timestamp(period)] = surp
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # --- Net Insider Share Buying (trailing 6 months) ---
+        net_insider = 0.0
+        try:
+            insider = ticker.insider_transactions
+            if insider is not None and not insider.empty:
+                cutoff = pd.Timestamp.now() - pd.DateOffset(months=6)
+                recent = insider[insider.index >= cutoff] if insider.index.dtype != object else insider
+                for _, row in recent.iterrows():
+                    shares = float(row.get('Shares', 0) or 0)
+                    txt = str(row.get('Transaction', '') or '').lower()
+                    if any(k in txt for k in ['purchase', 'buy', 'award', 'grant']):
+                        net_insider += shares
+                    elif any(k in txt for k in ['sale', 'sell', 'sold']):
+                        net_insider -= shares
+        except Exception:
+            pass
+
+        print(f"✓ ROE_pts={len(roe_series)} FCF_pts={len(fcf_series)} EPS_pts={len(eps_surprise_series)} InsiderNet={net_insider:.0f}")
+        return {
+            'roe': roe_series,
+            'fcf': fcf_series,
+            'eps_surprise': eps_surprise_series,
+            'net_insider': net_insider,
+        }
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return None
+
+
 def compute_technical_indicators(df):
     """
     Compute all 12 technical signals from OHLCV data.
@@ -206,18 +305,17 @@ def compute_technical_indicators(df):
     return df
 
 
-def create_signal_features(df):
+def create_signal_features(df, fundamental_data=None):
     """
-    Create 12 binary/continuous signal features:
-    1. Price > MA50 (bullish)
-    2. Price > MA200 (bullish)
-    3. RSI zone (oversold/healthy/overbought)
-    4. MACD bullish
-    5. BB oversold
-    6. KDJ oversold
-    7. OBV bullish
-    8. VWAP above
-    9-12. Additional momentum signals
+    Create binary/continuous signal features from OHLCV + optional fundamental data.
+    Technical signals (original):
+    1. Price > MA50/200, 2. RSI zone, 3. MACD, 4. BB, 5. KDJ, 6. OBV, 7. VWAP
+    8. Momentum, 9. Volatility, 10. Volume, 11. Drawdown, 12. Trend persistence
+    New fundamental signals (if fundamental_data provided):
+    13. ROE > 15% (quality factor)
+    14. FCF positive (cash generation)
+    15. Earnings surprise > 5% (beat) or < -5% (miss)
+    16. Net insider buying (>10k shares = bullish)
     """
     signals = pd.DataFrame(index=df.index)
     
@@ -285,7 +383,53 @@ def create_signal_features(df):
 
     trend_persistence_10 = (df['close'] > df['ma20']).astype(int).rolling(10).mean()
     signals['trend_persistence_10'] = trend_persistence_10.fillna(0)
-    
+
+    # ---- Fundamental signals (forward-filled from quarterly data) ----
+    if fundamental_data is not None:
+        dates = pd.to_datetime(df['date'])
+
+        # ROE: forward-fill quarterly value onto each trading day
+        roe_map = fundamental_data.get('roe', {})
+        if roe_map:
+            roe_ts = pd.Series(roe_map).sort_index()
+            roe_ts.index = pd.to_datetime(roe_ts.index)
+            daily_roe = roe_ts.reindex(dates, method='ffill').values
+            signals['fundamental_roe_gt15'] = (pd.Series(daily_roe).fillna(0) > 0.15).astype(int)
+            signals['fundamental_roe_raw'] = pd.Series(daily_roe).fillna(0)
+        else:
+            signals['fundamental_roe_gt15'] = 0
+            signals['fundamental_roe_raw'] = 0.0
+
+        # FCF: forward-fill; positive = 1, negative = 0
+        fcf_map = fundamental_data.get('fcf', {})
+        if fcf_map:
+            fcf_ts = pd.Series(fcf_map).sort_index()
+            fcf_ts.index = pd.to_datetime(fcf_ts.index)
+            daily_fcf = fcf_ts.reindex(dates, method='ffill').values
+            signals['fundamental_fcf_positive'] = (pd.Series(daily_fcf).fillna(0) > 0).astype(int)
+        else:
+            signals['fundamental_fcf_positive'] = 0
+
+        # Earnings Surprise %: last reported quarter forward-filled
+        eps_map = fundamental_data.get('eps_surprise', {})
+        if eps_map:
+            eps_ts = pd.Series(eps_map, dtype=float).sort_index()
+            eps_ts.index = pd.to_datetime(eps_ts.index)
+            daily_eps = eps_ts.reindex(dates, method='ffill').values
+            eps_series = pd.Series(daily_eps).fillna(0)
+            signals['fundamental_eps_beat'] = (eps_series > 0.05).astype(int)   # beat >5%
+            signals['fundamental_eps_miss'] = (eps_series < -0.05).astype(int)  # miss >5%
+            signals['fundamental_eps_surprise_pct'] = eps_series
+        else:
+            signals['fundamental_eps_beat'] = 0
+            signals['fundamental_eps_miss'] = 0
+            signals['fundamental_eps_surprise_pct'] = 0.0
+
+        # Insider net buy (constant for the whole symbol, 1 = net buyer over 6M)
+        net_insider = float(fundamental_data.get('net_insider', 0))
+        signals['fundamental_insider_net_buy'] = 1 if net_insider > 10000 else 0
+        signals['fundamental_insider_net_sell'] = 1 if net_insider < -50000 else 0
+
     return signals
 
 
@@ -522,6 +666,22 @@ def extract_signal_weights(feature_weights):
             # Use model's magnitude while preserving predefined sign convention.
             default_sign = 1.0 if signal_weights[signal] >= 0 else -1.0
             signal_weights[signal] = abs(feature_weights[feature]) * default_sign
+
+    # Map new fundamental features -> scoring.js signal keys
+    fundamental_feature_to_signal = {
+        'fundamental_roe_gt15':       ('quality_roe_high',      1.0),
+        'fundamental_fcf_positive':   ('quality_fcf_positive',  1.0),
+        'fundamental_eps_beat':       ('earnings_beat',          1.0),
+        'fundamental_eps_miss':       ('earnings_miss',         -1.0),
+        'fundamental_insider_net_buy': ('insider_net_buy',       1.5),
+        'fundamental_insider_net_sell': ('insider_net_sell',    -1.0),
+    }
+    for feature, (signal, default_sign) in fundamental_feature_to_signal.items():
+        if feature in feature_weights:
+            signal_weights[signal] = abs(feature_weights[feature]) * default_sign
+        else:
+            # Feature wasn't trained (fallback hardcoded)
+            signal_weights[signal] = default_sign * 0.5
     
     return signal_weights
 
@@ -582,11 +742,16 @@ def main():
             print(f"  Skipping {symbol} (insufficient data)")
             continue
         
+        # Fetch fundamental features (yfinance only)
+        fundamental_data = None
+        if YF_AVAILABLE and args.source != 'alpha':
+            fundamental_data = fetch_fundamental_features(symbol)
+
         # Compute indicators
         df = compute_technical_indicators(df)
         
         # Create shared signal matrix once, then horizon-specific targets.
-        signals = create_signal_features(df)
+        signals = create_signal_features(df, fundamental_data=fundamental_data)
         for h in horizon_days:
             threshold = get_threshold_for_horizon(h)
             target, _ = create_target_variable(df, forward_days=h, threshold=threshold)

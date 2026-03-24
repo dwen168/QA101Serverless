@@ -50,6 +50,7 @@ function getDefaultWeights() {
       rsi_overbought: { points: -2 },
       sentiment_bullish: { points: 2 },
       sentiment_bearish: { points: -2 },
+      short_pressure_bearish: { points: -1.5 },
       analyst_buy_strong: { points: 2 },
       analyst_buy_weak: { points: -1 },
       analyst_upside: { points: 1 },
@@ -77,6 +78,13 @@ function getDefaultWeights() {
       eda_volatility_bearish: { points: -0.5 },
       eda_trend_strength: { points: 0.5 },
       eda_trend_weakness: { points: -0.5 },
+      // Advanced fundamental signals (calibrated by signal-calibration.py)
+      quality_roe_high: { points: 1.0 },
+      quality_fcf_positive: { points: 1.0 },
+      earnings_beat: { points: 1.0 },
+      earnings_miss: { points: -1.0 },
+      insider_net_buy: { points: 1.5 },
+      insider_net_sell: { points: -1.0 },
     },
     model_metrics: {
       status: 'Hardcoded defaults (no calibration run yet)'

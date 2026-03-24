@@ -237,6 +237,17 @@
         </button>
       </div>
     </div>
+    <div class="export-menu">
+      <button class="export-btn" id="reports-menu-btn" onclick="toggleReportsMenu(event)">
+        <span>Reports</span>
+        <span class="caret">▼</span>
+      </button>
+      <div class="export-dropdown" id="reports-menu-dropdown">
+        <div id="reports-menu-list" class="reports-menu-list">
+          <div class="reports-menu-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
     <div class="export-menu" style="margin-left:8px">
       <button class="export-btn" id="info-btn" onclick="toggleInfoMenu(event)">
         <span>How it Works</span>
@@ -296,11 +307,11 @@
 
   <!-- Analysis Panel -->
   <div class="analysis-panel" id="analysis-panel">
-    <div class="welcome-state" id="welcome-state">
-      <div class="w-icon">📊</div>
-      <p>Ask QuantBot to analyze a stock, optimize a portfolio, or run a backtest to see<br>charts, insights, trade recommendations, and historical performance.</p>
-    </div>
+  <div class="welcome-state" id="welcome-state">
+    <div class="w-icon">📊</div>
+    <p>Ask QuantBot to analyze a stock, optimize a portfolio, or run a backtest to see<br>charts, insights, trade recommendations, and historical performance.</p>
   </div>
+
 
 </div>
 

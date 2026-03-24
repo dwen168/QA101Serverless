@@ -23,7 +23,9 @@ const {
   fetchFinnhubRecommendations, 
   fetchFinnhubPriceTarget, 
   fetchFinnhubNews, 
-  fetchFinnhubMacroNews 
+  fetchFinnhubMacroNews,
+  fetchFinnhubEarningsSurprise,
+  fetchFinnhubPeers
 } = require('./api-finnhub');
 
 const { 
@@ -49,7 +51,7 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     throw new Error('FINNHUB_API_KEY is missing');
   }
 
-  const [quoteResult, profileResult, metricsResult, candlesResult, recommendationsResult, priceTargetResult, yahooProfileResult] = await Promise.allSettled([
+  const [quoteResult, profileResult, metricsResult, candlesResult, recommendationsResult, priceTargetResult, yahooProfileResult, earningsResult, peersResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubQuote(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub quote fetch for ${ticker}`),
     withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
     withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
@@ -57,6 +59,8 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
     withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
     withTimeout(fetchYahooSummaryProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Yahoo summary profile for ${ticker}`),
+    withTimeout(fetchFinnhubEarningsSurprise(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub earnings surprise fetch for ${ticker}`),
+    withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`),
   ]);
 
   const quote = quoteResult.status === 'fulfilled' ? quoteResult.value : null;
@@ -66,6 +70,8 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
   let priceHistory = candlesResult.status === 'fulfilled' ? candlesResult.value : null;
   const recommendations = recommendationsResult.status === 'fulfilled' ? recommendationsResult.value : null;
   const priceTarget = priceTargetResult.status === 'fulfilled' ? priceTargetResult.value : null;
+  const earningsSurprise = earningsResult.status === 'fulfilled' ? earningsResult.value : [];
+  const peers = peersResult.status === 'fulfilled' ? peersResult.value : [];
   let priceHistorySource = 'finnhub';
 
   if (!Array.isArray(priceHistory) || priceHistory.length < 252) {
@@ -233,6 +239,8 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       targetMean: parseFloat(targetMean.toFixed(2)),
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
+    earningsSurprise,
+    peers,
     news: Array.isArray(companyNews) ? companyNews : [],
     macroContext: buildMacroContext({
       ticker,
@@ -299,7 +307,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       validateResult: false,
     }), REAL_DATA_TIMEOUT_MS, `Yahoo chart fetch for ${ticker}`),
     withTimeout(yf.quoteSummary(ticker, {
-      modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend'],
+      modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend', 'insiderTransactions', 'institutionOwnership', 'earningsHistory'],
     }), REAL_DATA_TIMEOUT_MS, `Yahoo quote summary fetch for ${ticker}`),
   ]);
   perfMs.yahooPriceApi = Date.now() - startApi;
@@ -315,6 +323,33 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const ks = summary.defaultKeyStatistics || {};
   const sp = summary.summaryProfile || {};
   const rt = summary.recommendationTrend?.trend?.[0] || {};
+  
+  const insiderTransactions = (summary.insiderTransactions?.transactions || []).slice(0, 10);
+  const institutionOwnership = (summary.institutionOwnership?.ownershipList || []).slice(0, 10);
+  const yahooEarnings = summary.earningsHistory?.history || [];
+  const earningsSurprise = yahooEarnings.map(e => ({
+    period: e.quarter ? new Date(e.quarter).toISOString().split('T')[0] : 'N/A',
+    actual: safeNumber(e.epsActual),
+    estimate: safeNumber(e.epsEstimate),
+    surprise: safeNumber(e.epsDifference),
+    surprisePercent: safeNumber(e.epsActual) && safeNumber(e.epsEstimate) ? (safeNumber(e.epsDifference) / Math.abs(safeNumber(e.epsEstimate))) * 100 : 0
+  })).reverse();
+  
+  const advancedFundamentals = {
+    freeCashflow: safeNumber(fd.freeCashflow),
+    operatingCashflow: safeNumber(fd.operatingCashflow),
+    totalDebt: safeNumber(fd.totalDebt),
+    totalRevenue: safeNumber(fd.totalRevenue),
+    ebitda: safeNumber(fd.ebitda),
+    revenueGrowth: safeNumber(fd.revenueGrowth),
+    returnOnEquity: safeNumber(fd.returnOnEquity),
+    returnOnAssets: safeNumber(fd.returnOnAssets),
+    debtToEquity: safeNumber(fd.debtToEquity),
+    grossMargins: safeNumber(fd.grossMargins),
+    operatingMargins: safeNumber(fd.operatingMargins),
+    priceToBook: safeNumber(ks.priceToBook),
+    enterpriseToEbitda: safeNumber(ks.enterpriseToEbitda),
+  };
 
   const priceHistory = validHistory.map((bar) => ({
     date: new Date(bar.date).toISOString().split('T')[0],
@@ -551,6 +586,10 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       targetMean: parseFloat(effectiveTargetMean.toFixed(4)),
       upside: effectiveTargetMean > 0 ? parseFloat((((effectiveTargetMean - price) / price) * 100).toFixed(1)) : 0,
     },
+    advancedFundamentals,
+    insiderTransactions,
+    institutionOwnership,
+    earningsSurprise,
     news: yahooNews,
     shortMetrics,
     macroContext: buildMacroContext({

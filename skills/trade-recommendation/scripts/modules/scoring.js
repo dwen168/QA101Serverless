@@ -98,12 +98,12 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   if (shortMetrics && shortMetrics.available !== false) {
     const shortPercent = Number(shortMetrics.shortPercent || 0);
     if (shortPercent > 5) {
-      add('High Short Interest', w('short_pressure_bearish', -2), `${shortPercent.toFixed(1)}% of float is short — potential shorting pressure.`, [
+      add('High Short Interest', macroWeight('short_pressure_bearish', -2), `${shortPercent.toFixed(1)}% of float is short — potential shorting pressure.`, [
         { label: 'Short %', value: `${shortPercent.toFixed(1)}%` },
         { label: 'Source', value: shortMetrics.dataSource || 'ASIC' },
       ], 'sentiment');
     } else if (shortPercent > 2) {
-      add('Moderate Short Interest', w('short_pressure_bearish', -1), `${shortPercent.toFixed(1)}% short — monitor for shorting activity.`, [
+      add('Moderate Short Interest', macroWeight('short_pressure_bearish', -1), `${shortPercent.toFixed(1)}% short — monitor for shorting activity.`, [
         { label: 'Short %', value: `${shortPercent.toFixed(1)}%` },
         { label: 'Source', value: shortMetrics.dataSource || 'ASIC' },
       ], 'sentiment');
@@ -371,6 +371,56 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       add('Rich Valuation', -1, 'Valuation is rich and leaves less margin of safety if growth expectations fade.', [
         { label: 'P/E', value: fmt(pe, 1) },
       ], 'valuation');
+    }
+  }
+
+  const roe = Number(marketData.advancedFundamentals?.returnOnEquity || 0);
+  if (roe > 0.15) {
+    add('High ROE', 1, 'Return on Equity is very strong (>15%), showing high quality fundamentals.', [
+      { label: 'ROE', value: `${(roe * 100).toFixed(1)}%` },
+    ], 'valuation');
+  }
+
+  const fcf = Number(marketData.advancedFundamentals?.freeCashflow || 0);
+  if (fcf > 0) {
+    add('Positive FCF', 1, 'Company generates positive free cash flow, reducing financing risk.', [
+      { label: 'FCF', value: `$${(fcf / 1e6).toFixed(1)}M` },
+    ], 'valuation');
+  }
+
+  if (marketData.earningsSurprise && marketData.earningsSurprise.length > 0) {
+    const latestSurprise = marketData.earningsSurprise[0];
+    if (latestSurprise.surprisePercent > 5 || latestSurprise.surprise > 0) {
+      add('Earnings Beat', 1, 'Latest earnings report beat analyst estimates, providing fundamental momentum.', [
+        { label: 'Beat By', value: latestSurprise.surprisePercent ? `+${latestSurprise.surprisePercent.toFixed(1)}%` : `+$${latestSurprise.surprise}` },
+        { label: 'Period', value: latestSurprise.period },
+      ], 'momentum');
+    } else if (latestSurprise.surprisePercent < -5 || latestSurprise.surprise < 0) {
+      add('Earnings Miss', -1, 'Latest earnings missed estimates, showing broken fundamental momentum.', [
+        { label: 'Missed By', value: latestSurprise.surprisePercent ? `${latestSurprise.surprisePercent.toFixed(1)}%` : `-$${Math.abs(latestSurprise.surprise)}` },
+        { label: 'Period', value: latestSurprise.period },
+      ], 'momentum');
+    }
+  }
+
+  if (marketData.insiderTransactions && marketData.insiderTransactions.length > 0) {
+    let netShares = 0;
+    marketData.insiderTransactions.forEach(t => {
+      const shares = typeof t.shares === 'object' ? Number(t.shares?.raw || 0) : Number(t.shares || 0);
+      const isPurchase = (t.transactionText || '').toLowerCase().includes('buy') || (t.transactionText || '').toLowerCase().includes('purchase') || (t.transactionText || '').toLowerCase().includes('award');
+      const isSale = (t.transactionText || '').toLowerCase().includes('sale') || (t.transactionText || '').toLowerCase().includes('sell');
+      if (isPurchase) netShares += shares;
+      else if (isSale) netShares -= shares;
+    });
+
+    if (netShares > 10000) {
+      add('Net Insider Buying', 1.5, 'Corporate insiders are taking net-long positions.', [
+        { label: 'Net Shares', value: `+${netShares.toLocaleString()}` },
+      ], 'sentiment');
+    } else if (netShares < -50000) {
+      add('Net Insider Selling', -1, 'Corporate insiders have been net sellers recently.', [
+        { label: 'Net Shares', value: `${netShares.toLocaleString()}` },
+      ], 'sentiment');
     }
   }
 

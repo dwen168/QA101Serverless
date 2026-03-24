@@ -11,12 +11,13 @@ const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts'
 const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
 const { runPortfolioOptimization } = require('../skills/portfolio-optimization/scripts');
 const { runBacktest } = require('../skills/backtesting/scripts');
+const { saveReport, listReports, getReport, deleteReport } = require('./lib/reports-db');
 
 const app = express();
 const skills = loadSkills();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
   const providerHeader = String(req.get('x-llm-provider') || '').trim().toLowerCase();
   const modelHeader = String(req.get('x-llm-model') || '').trim();
@@ -155,8 +156,68 @@ app.get('/api/llm/models', async (req, res) => {
   }
 });
 
+// ---- Reports (SQLite) ----
+
+// List all saved reports (no html)
+app.get('/api/reports', (_req, res) => {
+  try {
+    res.json(listReports());
+  } catch (err) {
+    handleRouteError(res, err);
+  }
+});
+
+// Get a single report by id (includes html)
+app.get('/api/reports/:id', (req, res) => {
+  try {
+    const report = getReport(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found' });
+    res.json(report);
+  } catch (err) {
+    handleRouteError(res, err);
+  }
+});
+
+// Save a new report
+app.post('/api/reports', (req, res) => {
+  try {
+    const { ticker, label, html } = req.body;
+    if (!ticker || !html) {
+      return res.status(400).json({ error: 'ticker and html are required' });
+    }
+    const result = saveReport({ ticker, label: label || ticker, html });
+    res.json(result);
+  } catch (err) {
+    handleRouteError(res, err);
+  }
+});
+
+// Delete a report by id
+app.delete('/api/reports/:id', (req, res) => {
+  try {
+    const result = deleteReport(req.params.id);
+    res.json(result);
+  } catch (err) {
+    handleRouteError(res, err);
+  }
+});
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
+});
+
+app.use((error, _req, res, next) => {
+  if (!error) {
+    next();
+    return;
+  }
+
+  if (error.type === 'entity.too.large') {
+    res.status(413).json({ error: 'Request payload is too large. Try saving a smaller report snapshot.' });
+    return;
+  }
+
+  handleRouteError(res, error);
 });
 
 app.listen(config.port, () => {

@@ -74,3 +74,51 @@ Each pillar aggregates the net point contribution of all signals that belong to 
 - **Actionable** — clicking "Show signals" inside any pillar reveals the exact signals (with reasons and point values) that formed that category's verdict.
 - **Honest about risk** — the Risk Penalty pillar makes headwinds visible rather than burying them inside an aggregate score.
 
+---
+
+## Reports Library (Save / Load / Delete)
+
+### Overview
+Analysts frequently need to revisit previous recommendations without re-running the full pipeline. v2.4 introduces a **persistent Reports Library** backed by a SQLite database, giving users a one-click save workflow and instant restore from any prior session.
+
+### Backend
+
+#### `backend/lib/reports-db.js`
+- Initialises a SQLite database at `backend/data/reports.db` using the `better-sqlite3` driver.
+- Schema:
+  ```
+  reports(id INTEGER PRIMARY KEY, ticker TEXT, label TEXT, html TEXT, created_at DATETIME)
+  ```
+- Exposes four synchronous helpers: `saveReport`, `listReports`, `getReport`, `deleteReport`.
+
+#### `backend/server.js` — REST Endpoints
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/reports` | Save current analysis HTML snapshot with `ticker` + `label` |
+| `GET` | `/api/reports` | List all saved reports (id, ticker, label, created_at — no html) |
+| `GET` | `/api/reports/:id` | Fetch full HTML of a single report |
+| `DELETE` | `/api/reports/:id` | Remove a report by id |
+
+Payload size is capped at 9 MB server-side; the UI also validates before sending.
+
+### Frontend
+
+#### Save
+- A **"Save to Reports Library"** button is injected into the existing Export dropdown at runtime (via `DOMContentLoaded` in `frontend/js/app.js`).
+- On click, `saveCurrentReport()` serialises the live analysis panel to a self-contained HTML string (charts captured as PNG via `canvas.toDataURL`), prompts the user for a label, and POSTs to `/api/reports`.
+- After a successful save the Reports top-menu dropdown is opened automatically so the user can see the new entry immediately.
+
+#### Load
+- The **Reports** top-navigation dropdown lists every saved report as a card with ticker, label, and timestamp.
+- Clicking **Load** on any card calls `restoreReport(id)`, which GETs the stored HTML and injects it directly into the analysis panel — no API calls, no re-processing.
+- The dropdown also surfaces **Load** / **Delete** action buttons per report.
+
+#### Delete
+- `deleteReport(id)` sends a `DELETE` to `/api/reports/:id`.
+- On success the Reports list refreshes in-place and a toast notification confirms the deletion.
+
+### Data Files
+- **`backend/data/reports.db`** — SQLite main database (persistent report records).
+- **`backend/data/reports.db-shm`** — Shared-memory WAL index (auto-managed by SQLite, not committed).
+- **`backend/data/reports.db-wal`** — Write-ahead log (merged back into `.db` on checkpoint, not committed).
+

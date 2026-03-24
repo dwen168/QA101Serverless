@@ -1101,6 +1101,39 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   `;
   panel.appendChild(grid);
 
+  const advCard = document.createElement('div');
+  advCard.className = 'card fade-in';
+  
+  let netShares = 0;
+  if (d.insiderTransactions) {
+    d.insiderTransactions.forEach(t => {
+      const shares = typeof t.shares === 'object' ? Number(t.shares?.raw || 0) : Number(t.shares || 0);
+      const isPurchase = (t.transactionText || '').toLowerCase().includes('buy') || (t.transactionText || '').toLowerCase().includes('purchase') || (t.transactionText || '').toLowerCase().includes('award');
+      const isSale = (t.transactionText || '').toLowerCase().includes('sale') || (t.transactionText || '').toLowerCase().includes('sell');
+      if (isPurchase) netShares += shares;
+      else if (isSale) netShares -= shares;
+    });
+  }
+
+  const roe = Number(d.advancedFundamentals?.returnOnEquity || 0);
+  const fcf = Number(d.advancedFundamentals?.freeCashflow || 0);
+  
+  const latestSurprise = d.earningsSurprise?.[0];
+  const beatValue = latestSurprise ? (latestSurprise.surprisePercent || (latestSurprise.surprise / (latestSurprise.estimate || 1) * 100)) : null;
+  const beatLabel = beatValue != null ? (beatValue > 0 ? `<span style="color:var(--green)">+${beatValue.toFixed(1)}%</span>` : `<span style="color:var(--red)">${beatValue.toFixed(1)}%</span>`) : '—';
+  
+  advCard.innerHTML = `
+    <div class="card-header"><span class="card-title">Advanced Fundamentals & Flow</span></div>
+    <div class="ticker-stats" style="grid-template-columns:repeat(5,1fr);margin-top:0;padding-top:0;border-top:none">
+      <div class="stat-item"><span class="stat-label">ROE</span><span class="stat-value">${roe ? (roe * 100).toFixed(1) + '%' : '—'}</span></div>
+      <div class="stat-item"><span class="stat-label">FREE CASH FLOW</span><span class="stat-value">${fcf ? '$' + (fcf >= 1e9 ? (fcf / 1e9).toFixed(2) + 'B' : (fcf / 1e6).toFixed(2) + 'M') : '—'}</span></div>
+      <div class="stat-item"><span class="stat-label">EARNINGS SURPRISE</span><span class="stat-value">${beatLabel}</span></div>
+      <div class="stat-item"><span class="stat-label">INSIDER (NET)</span><span class="stat-value">${netShares > 0 ? '<span style="color:var(--green)">+' + (netShares/1000).toFixed(1) + 'k</span>' : netShares < 0 ? '<span style="color:var(--red)">' + (netShares/1000).toFixed(1) + 'k</span>' : '—'}</span></div>
+      <div class="stat-item"><span class="stat-label">PEERS</span><span class="stat-value" style="font-size:10px">${(d.peers || []).slice(0, 3).join(', ') || '—'}</span></div>
+    </div>
+  `;
+  panel.appendChild(advCard);
+
   // LLM analysis summary
   if (llm?.summary) {
     const summary = document.createElement('div');
@@ -1918,6 +1951,8 @@ function destroyCharts() {
 
 function toggleExportMenu(event) {
   event.stopPropagation();
+  closeInfoMenu();
+  closeReportsMenu();
   const dropdown = document.getElementById('export-dropdown');
   dropdown.classList.toggle('open');
 }
@@ -1928,12 +1963,29 @@ function closeExportMenu() {
 
 function toggleInfoMenu(event) {
   event.stopPropagation();
+  closeExportMenu();
+  closeReportsMenu();
   const dropdown = document.getElementById('info-dropdown');
   dropdown.classList.toggle('open');
 }
 
 function closeInfoMenu() {
   document.getElementById('info-dropdown')?.classList.remove('open');
+}
+
+function toggleReportsMenu(event) {
+  event.stopPropagation();
+  closeExportMenu();
+  closeInfoMenu();
+  const dropdown = document.getElementById('reports-menu-dropdown');
+  dropdown?.classList.toggle('open');
+  if (dropdown?.classList.contains('open')) {
+    loadReportsList();
+  }
+}
+
+function closeReportsMenu() {
+  document.getElementById('reports-menu-dropdown')?.classList.remove('open');
 }
 
 function hasExportableContent() {
@@ -2004,10 +2056,28 @@ function clonePanelForExport() {
   }
 
   clone.id = 'export-analysis-panel';
+  clone.querySelector('#reports-fab')?.remove();
+  clone.querySelector('#reports-drawer')?.remove();
   clone.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
   clone.style.padding = '0';
   clone.style.overflow = 'visible';
   return clone;
+}
+
+function buildSavableReportHtml() {
+  const exportedPanel = clonePanelForExport();
+  return exportedPanel.innerHTML;
+}
+
+async function readJsonResponse(res) {
+  const text = await res.text();
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { error: text };
+  }
 }
 
 function buildExportDocument() {
@@ -2118,3 +2188,182 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
 initializeLlmConfig();
 document.addEventListener('click', closeExportMenu);
 document.addEventListener('click', closeInfoMenu);
+document.addEventListener('click', closeReportsMenu);
+
+// ─────────────────────────────────────────────
+//  Reports Library (SQLite-backed)
+// ─────────────────────────────────────────────
+
+function updateReportsBadge(count) {
+  const badge = document.getElementById('reports-count');
+  if (!badge) return;
+
+  if (count > 0) {
+    badge.textContent = count;
+    badge.style.display = 'inline';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function formatReportTimestamp(createdAt) {
+  return new Date(createdAt).toLocaleString('en-AU', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
+}
+
+function renderReportsMenu(reports) {
+  const container = document.getElementById('reports-menu-list');
+  if (!container) return;
+
+  if (!reports.length) {
+    container.innerHTML = '<div class="reports-menu-empty">No saved reports yet.<br>Use Save to Reports Library after generating an analysis.</div>';
+    return;
+  }
+
+  container.innerHTML = reports.map((report) => `
+    <div class="report-menu-item">
+      <div class="report-menu-meta">
+        <div class="report-menu-ticker">${report.ticker}</div>
+        <div class="report-menu-label" title="${report.label}">${report.label}</div>
+        <div class="report-menu-date">${formatReportTimestamp(report.created_at)}</div>
+      </div>
+      <div class="report-menu-actions">
+        <button class="report-menu-action load" onclick="event.stopPropagation();restoreReport(${report.id})">Load</button>
+        <button class="report-menu-action delete" onclick="event.stopPropagation();deleteReport(${report.id})">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function loadReportsList() {
+  const menuContainer = document.getElementById('reports-menu-list');
+  if (menuContainer) {
+    menuContainer.innerHTML = '<div class="reports-menu-empty">Loading...</div>';
+  }
+  try {
+    const res = await fetch(`${API_BASE}/reports`);
+    if (!res.ok) throw new Error('Failed to load reports');
+    const reports = await res.json();
+
+    updateReportsBadge(reports.length);
+    renderReportsMenu(reports);
+  } catch (err) {
+    if (menuContainer) {
+      menuContainer.innerHTML = `<div class="reports-menu-empty" style="color:var(--red)">Error loading reports: ${err.message}</div>`;
+    }
+  }
+}
+
+async function saveCurrentReport() {
+  if (!hasExportableContent()) {
+    showToast('❌ Run an analysis before saving a report', 'error');
+    return;
+  }
+
+  const panel = document.getElementById('analysis-panel');
+  const html = buildSavableReportHtml();
+  const payloadBytes = new Blob([html]).size;
+
+  if (payloadBytes > 9 * 1024 * 1024) {
+    showToast('❌ Report is too large to save', 'error');
+    return;
+  }
+
+  // Try to extract ticker from the panel
+  const tickerEl = panel.querySelector('.ticker-symbol');
+  const ticker = tickerEl ? tickerEl.textContent.trim() : 'UNKNOWN';
+
+  const label = prompt(`Save report label for ${ticker}:`, `${ticker} — ${new Date().toLocaleDateString('en-AU')}`);
+  if (!label) return; // user cancelled
+
+  try {
+    const res = await fetch(`${API_BASE}/reports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker, label, html }),
+    });
+    const data = await readJsonResponse(res);
+    if (!res.ok) {
+      throw new Error(data.error || `Save failed (${res.status})`);
+    }
+
+    if (data.id) {
+      showToast(`✅ Report saved (ID: ${data.id})`);
+      closeExportMenu();
+      await loadReportsList();
+
+      const reportsDropdown = document.getElementById('reports-menu-dropdown');
+      if (reportsDropdown && !reportsDropdown.classList.contains('open')) {
+        reportsDropdown.classList.add('open');
+      }
+    } else {
+      showToast(`❌ Save failed: ${data.error || 'unknown'}`, 'error');
+    }
+  } catch (err) {
+    showToast(`❌ ${err.message}`, 'error');
+  }
+}
+
+async function restoreReport(id) {
+  try {
+    const res = await fetch(`${API_BASE}/reports/${id}`);
+    if (!res.ok) throw new Error('Report not found');
+    const report = await res.json();
+
+    const panel = document.getElementById('analysis-panel');
+    const welcome = document.getElementById('welcome-state');
+    if (welcome) welcome.style.display = 'none';
+
+    panel.innerHTML = report.html;
+    closeReportsMenu();
+    showToast(`📂 Loaded: ${report.label}`);
+  } catch (err) {
+    showToast(`❌ ${err.message}`, 'error');
+  }
+}
+
+async function deleteReport(id) {
+  if (!confirm('Delete this saved report?')) return;
+  try {
+    const res = await fetch(`${API_BASE}/reports/${id}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data.deleted) {
+      showToast('🗑 Report deleted');
+      loadReportsList();
+    } else {
+      showToast('❌ Report could not be deleted', 'error');
+    }
+  } catch (err) {
+    showToast(`❌ ${err.message}`, 'error');
+  }
+}
+
+function showToast(message, type = 'success') {
+  const existing = document.getElementById('qb-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'qb-toast';
+  const bg = type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)';
+  const border = type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)';
+  toast.style.cssText = `position:fixed;bottom:24px;right:24px;z-index:9999;padding:10px 16px;border-radius:10px;font-size:13px;font-family:var(--mono);background:${bg};border:1px solid ${border};color:var(--text);backdrop-filter:blur(12px);box-shadow:0 8px 24px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;pointer-events:none`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
+// Inject "Save Report" button into the export dropdown on startup
+document.addEventListener('DOMContentLoaded', () => {
+  const dropdown = document.getElementById('export-dropdown');
+  if (dropdown) {
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'export-option';
+    saveBtn.onclick = saveCurrentReport;
+    saveBtn.innerHTML = `Save to Reports Library <span>SQLite</span>`;
+    dropdown.insertBefore(saveBtn, dropdown.firstChild);
+  }
+
+  loadReportsList().catch(() => {});
+});
