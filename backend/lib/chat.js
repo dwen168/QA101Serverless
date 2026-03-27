@@ -206,9 +206,8 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
     
     // Check if message looks like a ticker query (ticker alone, or with action keywords)
     const hasActionKeyword = msg.toLowerCase().match(/analyz|buy|sell|recommend|look at|check|research|price|news|target|opinion|should i|what.?s|performance/);
-    const isTickerOnly = tickerMatch && msg.split(/\s+/).length <= 2; // Just ticker, maybe with one word
-    
-    if (tickerMatch && (hasActionKeyword || isTickerOnly)) {
+
+    if (tickerMatch && hasActionKeyword) {
       const ticker = tickerMatch[1];
       return {
         message: `I'll analyze ${ticker} for you! Running all three skills now...`,

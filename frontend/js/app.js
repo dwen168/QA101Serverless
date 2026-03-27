@@ -272,6 +272,31 @@ async function apiFetch(url, options = {}) {
   return fetch(url, { ...options, signal });
 }
 
+async function readApiJson(response) {
+  const rawText = await response.text();
+  let payload = {};
+
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      const preview = rawText.slice(0, 120).replace(/\s+/g, ' ').trim();
+      throw new Error(`Backend returned non-JSON response (status ${response.status}). ${preview}`);
+    }
+  }
+
+  if (!response.ok) {
+    const errorMessage = String(payload?.error || payload?.message || `Request failed with status ${response.status}`);
+    throw new Error(errorMessage);
+  }
+
+  if (payload && typeof payload === 'object' && payload.error) {
+    throw new Error(String(payload.error));
+  }
+
+  return payload;
+}
+
 function setPillState(n, state) {
   const pill = document.getElementById(`pill-${n}`);
   pill.className = `skill-pill ${state}`;
@@ -322,7 +347,7 @@ async function processMessage(text) {
       headers: getLlmHeaders(),
       body: JSON.stringify({ message: text, history: chatHistory.slice(-6) }),
     });
-    const data = await res.json();
+    const data = await readApiJson(res);
     removeLoadingMsg();
 
     if (data.action === 'ANALYZE_STOCK' && data.ticker) {
@@ -352,14 +377,8 @@ async function processMessage(text) {
       return;
     }
     removeLoadingMsg();
-    // Fallback: detect ticker in text
-    const match = text.toUpperCase().match(/\b([A-Z]{2,5})\b/);
-    if (match && text.toLowerCase().match(/analyz|buy|sell|recommend|check|look/)) {
-      addMessage('bot', `Running analysis on <strong>${match[1]}</strong>...`);
-      await runSkillPipeline(match[1]);
-    } else {
-      addMessage('bot', `Ask me to analyze a stock! e.g. "Analyze AAPL"`);
-    }
+    const detail = String(err?.message || '').trim();
+    addMessage('bot', detail || 'Request failed. Please retry in a moment.');
   } finally {
     endRequestSession();
   }
@@ -383,7 +402,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
       method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ ticker }),
     });
-    const d1 = await r1.json();
+    const d1 = await readApiJson(r1);
     marketData = d1.marketData;
     llmAnalysis = d1.llmAnalysis;
     dataSource = d1.dataSource || d1.marketData.dataSource || 'unknown';
@@ -397,7 +416,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     if (isAbortError(err)) return;
     setPillState(1, '');
     removeLoadingMsg();
-    addMessage('bot', 'Could not reach the backend. Please check deployment status and API routes.');
+    addMessage('bot', String(err?.message || 'Market intelligence failed.'));
     return;
   }
 
@@ -412,7 +431,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
       method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ marketData }),
     });
-    const d2 = await r2.json();
+    const d2 = await readApiJson(r2);
     charts = d2.charts;
     edaInsights = d2.edaInsights;
     setPillState(2, 'done');
@@ -423,7 +442,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     if (isAbortError(err)) return;
     setPillState(2, '');
     removeLoadingMsg();
-    addMessage('bot', `EDA analysis failed.`);
+    addMessage('bot', String(err?.message || 'EDA analysis failed.'));
   }
 
   // ── SKILL 3 ──
@@ -436,7 +455,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
       method: 'POST', headers: getLlmHeaders(),
       body: JSON.stringify({ marketData, edaInsights, timeHorizon }),
     });
-    const d3 = await r3.json();
+    const d3 = await readApiJson(r3);
     setPillState(3, 'done');
     removeLoadingMsg();
     const rec = d3.recommendation;
