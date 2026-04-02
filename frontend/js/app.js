@@ -75,12 +75,12 @@ function escapeHtml(value) {
 const API_BASE = '/api';
 const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
-  gemini: 'gemma-3-12b-it',
+  gemini: 'gemma-3-27b-it',
   ollama: 'qwen3.5:9b',
 };
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  gemini: ['gemma-3-12b-it', 'gemma-3-27b-it'],
+  gemini: ['gemma-3-27b-it'],
   ollama: [],
 };
 const STORAGE_KEYS = {
