@@ -13,6 +13,35 @@ const isVercel = Boolean(process.env.VERCEL);
 const requestedLlmTimeoutMs = parsePositiveInt(process.env.LLM_TIMEOUT_MS, 15000);
 const llmTimeoutMs = isVercel ? Math.min(requestedLlmTimeoutMs, 9000) : requestedLlmTimeoutMs;
 
+function parseAuthUsers() {
+  const jsonRaw = String(process.env.AUTH_USERS_JSON || '').trim();
+  if (jsonRaw) {
+    try {
+      const parsed = JSON.parse(jsonRaw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry) => ({
+            username: String(entry?.username || '').trim(),
+            password: String(entry?.password || ''),
+          }))
+          .filter((entry) => entry.username && entry.password);
+      }
+    } catch {
+      // Falls back to AUTH_USERNAME/AUTH_PASSWORD when AUTH_USERS_JSON is invalid.
+    }
+  }
+
+  const username = String(process.env.AUTH_USERNAME || '').trim();
+  const password = String(process.env.AUTH_PASSWORD || '');
+  if (username && password) {
+    return [{ username, password }];
+  }
+
+  return [];
+}
+
+const authUsers = parseAuthUsers();
+
 module.exports = {
   port: Number(process.env.PORT || 3001),
   isVercel,
@@ -30,4 +59,8 @@ module.exports = {
   alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || 'demo',
   finnhubApiKey: process.env.FINNHUB_API_KEY || null,
   newsApiKey: process.env.NEWS_API_KEY || null,
+  authTokenSecret: String(process.env.AUTH_TOKEN_SECRET || 'change-this-auth-token-secret'),
+  authCookieName: String(process.env.AUTH_COOKIE_NAME || 'qb_auth'),
+  authTokenTtlSec: parsePositiveInt(process.env.AUTH_TOKEN_TTL_SEC, 60 * 60 * 12),
+  authUsers,
 };

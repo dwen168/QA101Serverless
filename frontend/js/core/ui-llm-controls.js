@@ -6,6 +6,11 @@ const DEFAULT_MODELS = {
   gemini: 'gemma-3-27b-it',
   ollama: 'qwen3.5:9b',
 };
+const PROVIDER_LABELS = {
+  deepseek: 'DeepSeek',
+  gemini: 'Gemini',
+  ollama: 'Ollama',
+};
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   gemini: ['gemma-3-27b-it'],
@@ -17,14 +22,40 @@ const STORAGE_KEYS = {
 };
 
 let llmConfig = {
-  provider: 'deepseek',
-  model: DEFAULT_MODELS.deepseek,
+  provider: 'gemini',
+  model: DEFAULT_MODELS.gemini,
 };
 let llmModelCache = {
   deepseek: [...MODEL_PRESETS.deepseek],
   gemini: [...MODEL_PRESETS.gemini],
   ollama: [...MODEL_PRESETS.ollama],
 };
+
+function getAllowedProviders() {
+  if (typeof window.getAuthState === 'function') {
+    const providers = window.getAuthState()?.providers;
+    if (Array.isArray(providers) && providers.length > 0) {
+      return providers;
+    }
+  }
+  return ['gemini', 'ollama', 'deepseek'];
+}
+
+function resolveProvider(provider, allowedProviders = getAllowedProviders()) {
+  const candidate = String(provider || '').trim().toLowerCase();
+  if (allowedProviders.includes(candidate)) return candidate;
+  if (allowedProviders.length > 0) return allowedProviders[0];
+  return 'gemini';
+}
+
+function renderProviderOptions(allowedProviders = getAllowedProviders()) {
+  const providerEl = document.getElementById('llm-provider');
+  if (!providerEl) return;
+
+  providerEl.innerHTML = allowedProviders
+    .map((provider) => `<option value="${provider}">${PROVIDER_LABELS[provider] || provider}</option>`)
+    .join('');
+}
 
 function getLlmHeaders(includeJson = true) {
   const headers = {};
@@ -46,6 +77,14 @@ function updateLlmControls() {
   const modelEl = document.getElementById('llm-model');
   const statusEl = document.getElementById('llm-status');
 
+  const allowedProviders = getAllowedProviders();
+  const resolvedProvider = resolveProvider(llmConfig.provider, allowedProviders);
+  if (resolvedProvider !== llmConfig.provider) {
+    llmConfig.provider = resolvedProvider;
+    llmConfig.model = DEFAULT_MODELS[resolvedProvider] || llmConfig.model;
+  }
+
+  renderProviderOptions(allowedProviders);
   if (providerEl) providerEl.value = llmConfig.provider;
   updateModelOptions(llmConfig.provider);
   if (modelEl) modelEl.value = llmConfig.model;
@@ -84,7 +123,7 @@ function updateModelOptions(provider) {
 }
 
 function applyLlmConfig(provider, model) {
-  const resolvedProvider = ['deepseek', 'ollama', 'gemini'].includes(provider) ? provider : 'deepseek';
+  const resolvedProvider = resolveProvider(provider);
   const resolvedModel = String(model || '').trim() || DEFAULT_MODELS[resolvedProvider];
 
   llmModelCache[resolvedProvider] = Array.from(new Set([
@@ -101,9 +140,17 @@ function applyLlmConfig(provider, model) {
 }
 
 async function refreshModelsForProvider(provider) {
+  const allowedProviders = getAllowedProviders();
+  if (!allowedProviders.includes(provider)) {
+    return;
+  }
+
   try {
     const response = await fetch(`${API_BASE}/llm/models?provider=${encodeURIComponent(provider)}`);
-    if (!response.ok) return;
+    if (!response.ok) {
+      if (response.status === 403) return;
+      return;
+    }
     const payload = await response.json();
     const models = Array.isArray(payload?.models)
       ? payload.models.map((item) => String(item || '').trim()).filter(Boolean)
@@ -116,11 +163,17 @@ async function refreshModelsForProvider(provider) {
   }
 }
 
+async function refreshLlmAvailability() {
+  const allowedProviders = getAllowedProviders();
+  const provider = resolveProvider(llmConfig.provider, allowedProviders);
+  await refreshModelsForProvider(provider);
+  applyLlmConfig(provider, llmConfig.model);
+}
+
 async function handleLlmProviderChange() {
   const providerEl = document.getElementById('llm-provider');
-  const nextProvider = ['deepseek', 'ollama', 'gemini'].includes(providerEl?.value)
-    ? providerEl.value
-    : 'deepseek';
+  const allowedProviders = getAllowedProviders();
+  const nextProvider = resolveProvider(providerEl?.value, allowedProviders);
   await refreshModelsForProvider(nextProvider);
   const candidates = llmModelCache[nextProvider] || [];
   const nextModel = candidates[0]
@@ -130,7 +183,7 @@ async function handleLlmProviderChange() {
 
 function handleLlmModelChange() {
   const selectedProvider = document.getElementById('llm-provider')?.value;
-  const provider = ['deepseek', 'ollama', 'gemini'].includes(selectedProvider) ? selectedProvider : 'deepseek';
+  const provider = resolveProvider(selectedProvider);
   const model = document.getElementById('llm-model')?.value;
   applyLlmConfig(provider, model);
 }
@@ -140,23 +193,26 @@ async function initializeLlmConfig() {
   const savedModel = localStorage.getItem(STORAGE_KEYS.model);
 
   if (savedProvider || savedModel) {
-    const provider = ['deepseek', 'ollama', 'gemini'].includes(savedProvider) ? savedProvider : 'deepseek';
+    const provider = resolveProvider(savedProvider);
     await refreshModelsForProvider(provider);
-    applyLlmConfig(savedProvider, savedModel);
+    applyLlmConfig(provider, savedModel);
     return;
   }
 
   try {
     const res = await fetch(`${API_BASE}/health`);
     const data = await res.json();
-    const provider = ['deepseek', 'ollama', 'gemini'].includes(data.llm?.provider)
-      ? data.llm.provider
-      : 'deepseek';
+    if (data?.auth && typeof window.setAuthState === 'function') {
+      window.setAuthState(data.auth);
+    }
+
+    const provider = resolveProvider(data.llm?.provider);
     await refreshModelsForProvider(provider);
-    applyLlmConfig(data.llm?.provider, data.llm?.model);
+    applyLlmConfig(provider, data.llm?.model);
   } catch {
-    await refreshModelsForProvider('deepseek');
-    applyLlmConfig('deepseek', DEFAULT_MODELS.deepseek);
+    const provider = resolveProvider('gemini');
+    await refreshModelsForProvider(provider);
+    applyLlmConfig(provider, DEFAULT_MODELS[provider]);
   }
 }
 
@@ -164,3 +220,4 @@ window.handleLlmProviderChange = handleLlmProviderChange;
 window.handleLlmModelChange = handleLlmModelChange;
 window.getLlmHeaders = getLlmHeaders;
 window.initializeLlmConfig = initializeLlmConfig;
+window.refreshLlmAvailability = refreshLlmAvailability;

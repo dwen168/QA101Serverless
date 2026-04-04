@@ -43,6 +43,10 @@
       <select id="llm-model" class="llm-model-input" onchange="handleLlmModelChange()"></select>
       <span class="llm-status" id="llm-status">loading...</span>
     </div>
+    <div class="auth-controls" id="auth-controls">
+      <span class="auth-user" id="auth-user">Guest</span>
+      <button class="auth-btn" id="auth-btn" onclick="handleAuthAction()">Login</button>
+    </div>
     
     <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
       <svg id="theme-icon-dark" viewBox="0 0 24 24" style="display:none"><path d="M12 21a9 9 0 0 1-6.36-15.36 1 1 0 0 1 1.09-.21 1 1 0 0 1 .54.91A7.05 7.05 0 0 0 14.33 13.4 7.05 7.05 0 0 0 21.4 6.3 1 1 0 0 1 22.3 5.75a1 1 0 0 1 .22 1.09 9 9 0 0 1-10.52 14.16z"/></svg>
@@ -162,6 +166,28 @@
     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M3 3h18v2H3V3zm0 16h18v2H3v-2zm0-8h18v2H3v-2zM3 11h12v2H3v-2z"/></svg>
     <span>Analysis</span>
   </button>
+</div>
+
+<!-- Login modal -->
+<div id="login-modal" class="auth-modal" aria-hidden="true">
+  <div class="auth-modal-card" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
+    <div class="auth-modal-header">
+      <h3 id="login-modal-title">Sign In</h3>
+      <button class="auth-modal-close" type="button" onclick="closeLoginModal()" aria-label="Close login dialog">&times;</button>
+    </div>
+    <p class="auth-modal-subtitle">Login is required to use the DeepSeek model.</p>
+    <form id="login-form" class="auth-form">
+      <label for="login-username" class="auth-label">Username</label>
+      <input id="login-username" class="auth-input" type="text" name="username" autocomplete="username" required>
+
+      <label for="login-password" class="auth-label">Password</label>
+      <input id="login-password" class="auth-input" type="password" name="password" autocomplete="current-password" required>
+
+      <div id="login-error" class="auth-error" role="alert" aria-live="assertive"></div>
+
+      <button id="login-submit" class="auth-submit" type="submit">Login</button>
+    </form>
+  </div>
 </div>
 
 <!-- Recommendation flow modal -->
@@ -383,6 +409,7 @@
 <script src="js/core/ui-export.js"></script>
 <script src="js/core/ui-flow-overview.js"></script>
 <script src="js/core/ui-reports.js"></script>
+<script src="js/core/ui-auth.js"></script>
 <script src="js/core/ui-llm-controls.js"></script>
 <script src="js/core/ui-chat-runtime.js"></script>
 <script src="js/core/ui-orchestration.js"></script>
