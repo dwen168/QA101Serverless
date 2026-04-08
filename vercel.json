@@ -12,5 +12,11 @@
       "source": "/:path*",
       "destination": "/frontend/:path*"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/sync-news",
+      "schedule": "0 22 * * *"
+    }
   ]
 }
