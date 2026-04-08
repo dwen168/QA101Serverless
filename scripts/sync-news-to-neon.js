@@ -3,7 +3,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const dotenv = require('dotenv');
-const sql = require('mssql');
+const { Pool } = require('pg');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -13,7 +13,7 @@ const {
   fetchFinnhubMarketData,
   fetchAlphaVantageMarketData,
 } = require('../skills/market-intelligence/scripts/modules/market-data');
-const { 
+const {
   fetchFinnhubMacroNews,
   fetchFinnhubQuote,
   fetchFinnhubProfile,
@@ -23,7 +23,7 @@ const {
   fetchGoogleNewsRssQuery,
   fetchLatestCentralBankDecision,
 } = require('../skills/market-intelligence/scripts/modules/api-news');
-const { 
+const {
   fetchMacroAnchors,
 } = require('../skills/market-intelligence/scripts/modules/macro-anchors');
 const { scoreMacroNewsWithLlm } = require('../skills/market-intelligence/scripts/modules/sentiment');
@@ -77,44 +77,47 @@ function parseTickers() {
   );
 }
 
-function envPick(...keys) {
-  for (const key of keys) {
-    const value = process.env[key] || process.env[String(key).toLowerCase()];
-    if (String(value || '').trim()) {
-      return String(value).trim();
-    }
-  }
-  return '';
-}
+function resolvePoolConfig() {
+  // Use DATABASE_URL_UNPOOLED for a standalone script (avoids PgBouncer transaction mode limits).
+  // Falls back to DATABASE_URL, then individual PGHOST/PGUSER/PGPASSWORD/PGDATABASE env vars.
+  const connectionString =
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL;
 
-function resolveSqlConfig() {
-  const user = envPick('CLOUDEVENT_DB_USERNAME', 'AZURE_SQL_USERNAME');
-  const password = envPick('CLOUDEVENT_DB_PASSWORD', 'AZURE_SQL_PASSWORD');
-  const database = envPick('AZURE_SQL_DATABASE', 'CLOUDEVENT_DB_DATABASE', 'CLOUDEVENT_DB_NAME');
-
-  if (!user || !password) {
-    throw new Error('Missing DB credentials. Set CLOUDEVENT_DB_USERNAME and CLOUDEVENT_DB_PASSWORD.');
+  if (connectionString) {
+    return {
+      connectionString,
+      ssl: { rejectUnauthorized: false },
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    };
   }
-  if (!database) {
-    throw new Error('Missing database name. Set AZURE_SQL_DATABASE (or CLOUDEVENT_DB_DATABASE).');
+
+  const host = process.env.PGHOST_UNPOOLED || process.env.PGHOST;
+  const user = process.env.PGUSER || process.env.POSTGRES_USER;
+  const password = process.env.PGPASSWORD || process.env.POSTGRES_PASSWORD;
+  const database = process.env.PGDATABASE || process.env.POSTGRES_DATABASE;
+
+  if (!host || !user || !password || !database) {
+    throw new Error(
+      'Missing Neon/PostgreSQL credentials. Set DATABASE_URL_UNPOOLED (or DATABASE_URL) in .env, ' +
+        'or set PGHOST, PGUSER, PGPASSWORD, PGDATABASE individually.'
+    );
   }
 
   return {
-    server: envPick('AZURE_SQL_SERVER') || 'quantbot.database.windows.net',
-    database,
+    host,
     user,
     password,
-    port: Number(envPick('AZURE_SQL_PORT') || 1433),
-    options: {
-      encrypt: true,
-      trustServerCertificate: false,
-    },
-    pool: {
-      max: 5,
-      min: 0,
-      idleTimeoutMillis: 30000,
-    },
-    requestTimeout: 30000,
+    database,
+    port: Number(process.env.PGPORT || 5432),
+    ssl: { rejectUnauthorized: false },
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
   };
 }
 
@@ -258,8 +261,7 @@ async function fetchMacroAnchorsRows() {
 async function fetchCentralBankDecisionsRows() {
   try {
     const decisions = [];
-    
-    // Fetch RBA and FED decisions
+
     const [rbaDecision, fedDecision] = await Promise.allSettled([
       fetchLatestCentralBankDecision('RBA'),
       fetchLatestCentralBankDecision('FED'),
@@ -314,20 +316,16 @@ async function fetchTickerFundamentalsRows(ticker) {
     let marketData = null;
     let dataSource = 'unknown';
 
-    // Select appropriate data source based on ticker format
     try {
       if (ticker.includes('.')) {
-        // ASX ticker (e.g., CBA.AX) - use Yahoo Finance
         marketData = await fetchYahooFinanceData(ticker);
         dataSource = 'yahoo-finance';
       } else {
-        // US ticker - use Finnhub
         marketData = await fetchFinnhubMarketData(ticker);
         dataSource = 'finnhub';
       }
     } catch (error) {
       console.debug(`[sync-data] Market data fetch for ${ticker} failed (trying fallback): ${error.message}`);
-      // Fallback: try the other source
       try {
         if (!ticker.includes('.')) {
           marketData = await fetchYahooFinanceData(ticker);
@@ -346,30 +344,26 @@ async function fetchTickerFundamentalsRows(ticker) {
       return [];
     }
 
-    // Extract fundamentals from market data
     const sector = clampText(marketData.sector || 'Unknown', 128);
     const marketCap = safeNumber(marketData.marketCap);
     const pe = safeNumber(marketData.pe);
     const eps = safeNumber(marketData.eps);
-    
-    // Advanced fundamentals from Yahoo Finance (if available)
+
     const advFund = marketData.advancedFundamentals || {};
     const roe = safeNumber(advFund.returnOnEquity);
-    
-    // Trading metrics
-    const return3m = 0; // Not easily derived from single fetch, would need historical calculation
+
+    const return3m = 0;
     const rsi = safeNumber(marketData.rsi);
     const volume = safeNumber(marketData.volume);
     const avgVolume = safeNumber(marketData.avgVolume);
     const volumeRatio = avgVolume > 0 ? volume / avgVolume : null;
 
-    // Short selling data (ASX only via ASIC/ShortMan)
     const shortMetrics = marketData.shortMetrics || null;
     const shortPercent = shortMetrics && Number.isFinite(shortMetrics.shortPercent) ? shortMetrics.shortPercent : null;
-    const shortIsMock = shortMetrics ? (shortMetrics.isMock === true ? 1 : 0) : null;
+    // PostgreSQL BOOLEAN: use true/false instead of 1/0
+    const shortIsMock = shortMetrics ? shortMetrics.isMock === true : null;
     const shortDataSource = shortMetrics ? clampText(shortMetrics.dataSource || '', 128) || null : null;
 
-    // Compute scores (same logic as market-data.js)
     function buildFundamentalScore(params) {
       const peScore = params.pe > 0 ? clampScore((28 - params.pe) / 28) : 0;
       const epsScore = clampScore((params.eps || 0) / 8);
@@ -468,503 +462,375 @@ async function fetchMacroNewsRows() {
 }
 
 async function ensureSchema(pool) {
-  const sqlText = `
--- ========== NEWS ARCHIVE TABLE (WITH UPDATES) ==========
-IF OBJECT_ID('dbo.market_news_archive', 'U') IS NULL
-BEGIN
-  CREATE TABLE dbo.market_news_archive (
-    id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    news_scope NVARCHAR(16) NOT NULL,
-    ticker NVARCHAR(32) NOT NULL,
-    title NVARCHAR(1024) NOT NULL,
-    summary NVARCHAR(MAX) NULL,
-    url NVARCHAR(2048) NULL,
-    source NVARCHAR(255) NULL,
-    sentiment FLOAT NULL,
-    macro_theme NVARCHAR(64) NULL,
-    hours_ago INT NULL,
-    published_at_utc DATETIME2 NULL,
-    collected_at_utc DATETIME2 NOT NULL,
-    data_source NVARCHAR(64) NOT NULL,
-    news_source_breakdown NVARCHAR(128) NULL,
-    content_hash CHAR(64) NOT NULL,
-    created_at_utc DATETIME2 NOT NULL CONSTRAINT DF_market_news_archive_created_at DEFAULT SYSUTCDATETIME()
-  );
-END
-ELSE
-BEGIN
-  -- Add macro_theme column if it doesn't exist
-  IF NOT EXISTS (
-    SELECT 1
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'market_news_archive'
-      AND COLUMN_NAME = 'macro_theme'
-      AND TABLE_SCHEMA = 'dbo'
-  )
-  BEGIN
-    ALTER TABLE dbo.market_news_archive
-    ADD macro_theme NVARCHAR(64) NULL;
-  END;
-END;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-;WITH ranked_duplicates AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (
-      PARTITION BY
-        news_scope,
-        ticker,
-        title,
-        ISNULL(url, ''),
-        ISNULL(source, '')
-      ORDER BY collected_at_utc DESC, id DESC
-    ) AS rn
-  FROM dbo.market_news_archive
-)
-DELETE FROM dbo.market_news_archive
-WHERE id IN (
-  SELECT id
-  FROM ranked_duplicates
-  WHERE rn > 1
-);
+    // ========== NEWS ARCHIVE TABLE ==========
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS market_news_archive (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        news_scope VARCHAR(16) NOT NULL,
+        ticker VARCHAR(32) NOT NULL,
+        title VARCHAR(1024) NOT NULL,
+        summary TEXT NULL,
+        url VARCHAR(2048) NULL,
+        source VARCHAR(255) NULL,
+        sentiment DOUBLE PRECISION NULL,
+        macro_theme VARCHAR(64) NULL,
+        hours_ago INT NULL,
+        published_at_utc TIMESTAMPTZ NULL,
+        collected_at_utc TIMESTAMPTZ NOT NULL,
+        data_source VARCHAR(64) NOT NULL,
+        news_source_breakdown VARCHAR(128) NULL,
+        content_hash CHAR(64) NOT NULL,
+        created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
-IF NOT EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'UX_market_news_archive_scope_ticker_hash'
-    AND object_id = OBJECT_ID('dbo.market_news_archive')
-)
-BEGIN
-  CREATE UNIQUE INDEX UX_market_news_archive_scope_ticker_hash
-    ON dbo.market_news_archive (news_scope, ticker, content_hash);
-END;
+    await client.query(`
+      ALTER TABLE market_news_archive
+        ADD COLUMN IF NOT EXISTS macro_theme VARCHAR(64) NULL
+    `);
 
--- ========== MACRO ANCHORS TABLE ==========
-IF OBJECT_ID('dbo.market_macro_anchors', 'U') IS NULL
-BEGIN
-  CREATE TABLE dbo.market_macro_anchors (
-    id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    anchor_ticker NVARCHAR(32) NOT NULL,
-    anchor_name NVARCHAR(128) NOT NULL,
-    anchor_type NVARCHAR(32) NOT NULL,
-    current_price FLOAT NOT NULL,
-    change_percent FLOAT NOT NULL,
-    trend NVARCHAR(16) NOT NULL,
-    price_history NVARCHAR(MAX) NULL,
-    collected_at_utc DATETIME2 NOT NULL,
-    created_at_utc DATETIME2 NOT NULL CONSTRAINT DF_market_macro_anchors_created_at DEFAULT SYSUTCDATETIME()
-  );
-END;
+    // Deduplicate existing rows
+    await client.query(`
+      DELETE FROM market_news_archive
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY news_scope, ticker, title, COALESCE(url, ''), COALESCE(source, '')
+              ORDER BY collected_at_utc DESC, id DESC
+            ) AS rn
+          FROM market_news_archive
+        ) sub
+        WHERE rn > 1
+      )
+    `);
 
--- Drop old unique index if it exists (we now use DELETE+INSERT for daily snapshots)
-IF EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'UX_market_macro_anchors_ticker_collected'
-    AND object_id = OBJECT_ID('dbo.market_macro_anchors')
-)
-BEGIN
-  DROP INDEX UX_market_macro_anchors_ticker_collected ON dbo.market_macro_anchors;
-END;
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_market_news_archive_scope_ticker_hash
+        ON market_news_archive (news_scope, ticker, content_hash)
+    `);
 
--- Create new index for efficient queries (non-unique, for date-based lookups)
-IF NOT EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'IX_market_macro_anchors_ticker_date'
-    AND object_id = OBJECT_ID('dbo.market_macro_anchors')
-)
-BEGIN
-  CREATE INDEX IX_market_macro_anchors_ticker_date
-    ON dbo.market_macro_anchors (anchor_ticker, collected_at_utc DESC);
-END;
+    // ========== MACRO ANCHORS TABLE ==========
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS market_macro_anchors (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        anchor_ticker VARCHAR(32) NOT NULL,
+        anchor_name VARCHAR(128) NOT NULL,
+        anchor_type VARCHAR(32) NOT NULL,
+        current_price DOUBLE PRECISION NOT NULL,
+        change_percent DOUBLE PRECISION NOT NULL,
+        trend VARCHAR(16) NOT NULL,
+        price_history TEXT NULL,
+        collected_at_utc TIMESTAMPTZ NOT NULL,
+        created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
--- ========== CENTRAL BANK DECISIONS TABLE ==========
-IF OBJECT_ID('dbo.central_bank_decisions', 'U') IS NULL
-BEGIN
-  CREATE TABLE dbo.central_bank_decisions (
-    id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    bank NVARCHAR(32) NOT NULL,
-    title NVARCHAR(1024) NOT NULL,
-    summary NVARCHAR(MAX) NULL,
-    url NVARCHAR(2048) NULL,
-    source NVARCHAR(255) NULL,
-    bias NVARCHAR(32) NULL,
-    hours_ago INT NULL,
-    published_at_utc DATETIME2 NULL,
-    collected_at_utc DATETIME2 NOT NULL,
-    data_source NVARCHAR(64) NOT NULL,
-    content_hash CHAR(64) NOT NULL,
-    created_at_utc DATETIME2 NOT NULL CONSTRAINT DF_central_bank_decisions_created_at DEFAULT SYSUTCDATETIME()
-  );
-END;
+    await client.query(`
+      DROP INDEX IF EXISTS ux_market_macro_anchors_ticker_collected
+    `);
 
-IF NOT EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'UX_central_bank_decisions_bank_hash'
-    AND object_id = OBJECT_ID('dbo.central_bank_decisions')
-)
-BEGIN
-  CREATE UNIQUE INDEX UX_central_bank_decisions_bank_hash
-    ON dbo.central_bank_decisions (bank, content_hash);
-END;
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS ix_market_macro_anchors_ticker_date
+        ON market_macro_anchors (anchor_ticker, collected_at_utc DESC)
+    `);
 
-;WITH ranked_central_bank_duplicates AS (
-  SELECT
-    id,
-    ROW_NUMBER() OVER (
-      PARTITION BY
-        bank,
-        title,
-        ISNULL(url, ''),
-        ISNULL(source, '')
-      ORDER BY collected_at_utc DESC, id DESC
-    ) AS rn
-  FROM dbo.central_bank_decisions
-)
-DELETE FROM dbo.central_bank_decisions
-WHERE id IN (
-  SELECT id
-  FROM ranked_central_bank_duplicates
-  WHERE rn > 1
-);
+    // ========== CENTRAL BANK DECISIONS TABLE ==========
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS central_bank_decisions (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        bank VARCHAR(32) NOT NULL,
+        title VARCHAR(1024) NOT NULL,
+        summary TEXT NULL,
+        url VARCHAR(2048) NULL,
+        source VARCHAR(255) NULL,
+        bias VARCHAR(32) NULL,
+        hours_ago INT NULL,
+        published_at_utc TIMESTAMPTZ NULL,
+        collected_at_utc TIMESTAMPTZ NOT NULL,
+        data_source VARCHAR(64) NOT NULL,
+        content_hash CHAR(64) NOT NULL,
+        created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
--- ========== TICKER FUNDAMENTALS TABLE ==========
-IF OBJECT_ID('dbo.ticker_fundamentals', 'U') IS NULL
-BEGIN
-  CREATE TABLE dbo.ticker_fundamentals (
-    id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    ticker NVARCHAR(32) NOT NULL,
-    sector NVARCHAR(128) NULL,
-    market_cap BIGINT NULL,
-    pe_ratio FLOAT NULL,
-    eps FLOAT NULL,
-    roe FLOAT NULL,
-    fundamental_score FLOAT NULL,
-    trading_score FLOAT NULL,
-    return_3m FLOAT NULL,
-    rsi FLOAT NULL,
-    volume_ratio FLOAT NULL,
-    short_percent FLOAT NULL,
-    short_is_mock BIT NULL,
-    short_data_source NVARCHAR(128) NULL,
-    collected_at_utc DATETIME2 NOT NULL,
-    data_source NVARCHAR(64) NOT NULL,
-    created_at_utc DATETIME2 NOT NULL CONSTRAINT DF_ticker_fundamentals_created_at DEFAULT SYSUTCDATETIME()
-  );
-END
-ELSE
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'ticker_fundamentals' AND COLUMN_NAME = 'short_percent' AND TABLE_SCHEMA = 'dbo'
-  )
-  BEGIN
-    ALTER TABLE dbo.ticker_fundamentals ADD short_percent FLOAT NULL;
-    ALTER TABLE dbo.ticker_fundamentals ADD short_is_mock BIT NULL;
-    ALTER TABLE dbo.ticker_fundamentals ADD short_data_source NVARCHAR(128) NULL;
-  END;
-END;
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_central_bank_decisions_bank_hash
+        ON central_bank_decisions (bank, content_hash)
+    `);
 
--- Drop old unique index if it exists (we now use DELETE+INSERT for daily snapshots)
-IF EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'UX_ticker_fundamentals_ticker_collected'
-    AND object_id = OBJECT_ID('dbo.ticker_fundamentals')
-)
-BEGIN
-  DROP INDEX UX_ticker_fundamentals_ticker_collected ON dbo.ticker_fundamentals;
-END;
+    // Deduplicate existing rows
+    await client.query(`
+      DELETE FROM central_bank_decisions
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id,
+            ROW_NUMBER() OVER (
+              PARTITION BY bank, title, COALESCE(url, ''), COALESCE(source, '')
+              ORDER BY collected_at_utc DESC, id DESC
+            ) AS rn
+          FROM central_bank_decisions
+        ) sub
+        WHERE rn > 1
+      )
+    `);
 
--- Create new index for efficient queries (non-unique, for date-based lookups)
-IF NOT EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'IX_ticker_fundamentals_ticker_date'
-    AND object_id = OBJECT_ID('dbo.ticker_fundamentals')
-)
-BEGIN
-  CREATE INDEX IX_ticker_fundamentals_ticker_date
-    ON dbo.ticker_fundamentals (ticker, collected_at_utc DESC);
-END;
+    // ========== TICKER FUNDAMENTALS TABLE ==========
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ticker_fundamentals (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        ticker VARCHAR(32) NOT NULL,
+        sector VARCHAR(128) NULL,
+        market_cap BIGINT NULL,
+        pe_ratio DOUBLE PRECISION NULL,
+        eps DOUBLE PRECISION NULL,
+        roe DOUBLE PRECISION NULL,
+        fundamental_score DOUBLE PRECISION NULL,
+        trading_score DOUBLE PRECISION NULL,
+        return_3m DOUBLE PRECISION NULL,
+        rsi DOUBLE PRECISION NULL,
+        volume_ratio DOUBLE PRECISION NULL,
+        short_percent DOUBLE PRECISION NULL,
+        short_is_mock BOOLEAN NULL,
+        short_data_source VARCHAR(128) NULL,
+        collected_at_utc TIMESTAMPTZ NOT NULL,
+        data_source VARCHAR(64) NOT NULL,
+        created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
--- ========== MARKET CONTEXT TABLE (Benchmarks + Sectors) ==========
-IF OBJECT_ID('dbo.market_context', 'U') IS NULL
-BEGIN
-  CREATE TABLE dbo.market_context (
-    id BIGINT IDENTITY(1,1) PRIMARY KEY,
-    context_type NVARCHAR(32) NOT NULL,
-    context_name NVARCHAR(128) NOT NULL,
-    context_ticker NVARCHAR(32) NOT NULL,
-    trend NVARCHAR(16) NOT NULL,
-    change_percent FLOAT NOT NULL,
-    price_history NVARCHAR(MAX) NULL,
-    collected_at_utc DATETIME2 NOT NULL,
-    created_at_utc DATETIME2 NOT NULL CONSTRAINT DF_market_context_created_at DEFAULT SYSUTCDATETIME()
-  );
-END;
+    await client.query(`
+      ALTER TABLE ticker_fundamentals
+        ADD COLUMN IF NOT EXISTS short_percent DOUBLE PRECISION NULL,
+        ADD COLUMN IF NOT EXISTS short_is_mock BOOLEAN NULL,
+        ADD COLUMN IF NOT EXISTS short_data_source VARCHAR(128) NULL
+    `);
 
-IF NOT EXISTS (
-  SELECT 1
-  FROM sys.indexes
-  WHERE name = 'UX_market_context_type_ticker_collected'
-    AND object_id = OBJECT_ID('dbo.market_context')
-)
-BEGIN
-  CREATE UNIQUE INDEX UX_market_context_type_ticker_collected
-    ON dbo.market_context (context_type, context_ticker, collected_at_utc);
-END;
-`;
+    await client.query(`
+      DROP INDEX IF EXISTS ux_ticker_fundamentals_ticker_collected
+    `);
 
-  await pool.request().query(sqlText);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS ix_ticker_fundamentals_ticker_date
+        ON ticker_fundamentals (ticker, collected_at_utc DESC)
+    `);
+
+    // ========== MARKET CONTEXT TABLE ==========
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS market_context (
+        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        context_type VARCHAR(32) NOT NULL,
+        context_name VARCHAR(128) NOT NULL,
+        context_ticker VARCHAR(32) NOT NULL,
+        trend VARCHAR(16) NOT NULL,
+        change_percent DOUBLE PRECISION NOT NULL,
+        price_history TEXT NULL,
+        collected_at_utc TIMESTAMPTZ NOT NULL,
+        created_at_utc TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_market_context_type_ticker_collected
+        ON market_context (context_type, context_ticker, collected_at_utc)
+    `);
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function insertRowIfNew(pool, row) {
-  const request = pool.request();
-  request.input('newsScope', sql.NVarChar(16), row.newsScope);
-  request.input('ticker', sql.NVarChar(32), row.ticker);
-  request.input('title', sql.NVarChar(1024), row.title);
-  request.input('summary', sql.NVarChar(sql.MAX), row.summary);
-  request.input('url', sql.NVarChar(2048), row.url || null);
-  request.input('source', sql.NVarChar(255), row.source || null);
-  request.input('sentiment', sql.Float, row.sentiment);
-  request.input('macroTheme', sql.NVarChar(64), row.macroTheme || null);
-  request.input('hoursAgo', sql.Int, row.hoursAgo);
-  request.input('publishedAtUtc', sql.DateTime2, row.publishedAtUtc);
-  request.input('collectedAtUtc', sql.DateTime2, row.collectedAtUtc);
-  request.input('dataSource', sql.NVarChar(64), row.dataSource);
-  request.input('newsSourceBreakdown', sql.NVarChar(128), row.newsSourceBreakdown);
-  request.input('contentHash', sql.Char(64), row.contentHash);
+  const existing = await pool.query(
+    `SELECT 1 FROM market_news_archive
+     WHERE news_scope = $1
+       AND ticker = $2
+       AND (
+         content_hash = $3
+         OR (
+           title = $4
+           AND COALESCE(url, '') = COALESCE($5, '')
+           AND COALESCE(source, '') = COALESCE($6, '')
+         )
+       )
+     LIMIT 1`,
+    [row.newsScope, row.ticker, row.contentHash, row.title, row.url || null, row.source || null]
+  );
 
-  const insertSql = `
-INSERT INTO dbo.market_news_archive (
-  news_scope,
-  ticker,
-  title,
-  summary,
-  url,
-  source,
-  sentiment,
-  macro_theme,
-  hours_ago,
-  published_at_utc,
-  collected_at_utc,
-  data_source,
-  news_source_breakdown,
-  content_hash
-)
-SELECT
-  @newsScope,
-  @ticker,
-  @title,
-  @summary,
-  @url,
-  @source,
-  @sentiment,
-  @macroTheme,
-  @hoursAgo,
-  @publishedAtUtc,
-  @collectedAtUtc,
-  @dataSource,
-  @newsSourceBreakdown,
-  @contentHash
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM dbo.market_news_archive
-  WHERE news_scope = @newsScope
-    AND ticker = @ticker
-    AND (
-      content_hash = @contentHash
-      OR (
-        title = @title
-        AND ISNULL(url, '') = ISNULL(@url, '')
-        AND ISNULL(source, '') = ISNULL(@source, '')
-      )
-    )
-);
-`;
+  if (existing.rowCount > 0) return 'SKIP';
 
-  const result = await request.query(insertSql);
-  return result.rowsAffected?.[0] > 0 ? 'INSERT' : 'SKIP';
+  try {
+    await pool.query(
+      `INSERT INTO market_news_archive (
+        news_scope, ticker, title, summary, url, source, sentiment,
+        macro_theme, hours_ago, published_at_utc, collected_at_utc,
+        data_source, news_source_breakdown, content_hash
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [
+        row.newsScope,
+        row.ticker,
+        row.title,
+        row.summary,
+        row.url || null,
+        row.source || null,
+        row.sentiment,
+        row.macroTheme || null,
+        row.hoursAgo,
+        row.publishedAtUtc,
+        row.collectedAtUtc,
+        row.dataSource,
+        row.newsSourceBreakdown,
+        row.contentHash,
+      ]
+    );
+    return 'INSERT';
+  } catch (err) {
+    if (err.code === '23505') return 'SKIP'; // unique constraint race condition
+    throw err;
+  }
 }
 
 async function insertMacroAnchorIfNew(pool, anchor) {
-  const request = pool.request();
-  request.input('anchorTicker', sql.NVarChar(32), anchor.anchorTicker);
-  request.input('anchorName', sql.NVarChar(128), anchor.anchorName);
-  request.input('anchorType', sql.NVarChar(32), anchor.anchorType);
-  request.input('currentPrice', sql.Float, anchor.currentPrice);
-  request.input('changePercent', sql.Float, anchor.changePercent);
-  request.input('trend', sql.NVarChar(16), anchor.trend);
-  request.input('priceHistory', sql.NVarChar(sql.MAX), anchor.priceHistory);
-  request.input('collectedAtUtc', sql.DateTime2, anchor.collectedAtUtc);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Delete old records from the same day (keep only latest snapshot per day)
-  const deleteSql = `
-  DELETE FROM dbo.market_macro_anchors
-  WHERE anchor_ticker = @anchorTicker
-    AND CAST(collected_at_utc AS DATE) = CAST(@collectedAtUtc AS DATE);
-  `;
-  await request.query(deleteSql);
+    // Replace today's snapshot for this anchor
+    await client.query(
+      `DELETE FROM market_macro_anchors
+       WHERE anchor_ticker = $1
+         AND collected_at_utc::date = $2::date`,
+      [anchor.anchorTicker, anchor.collectedAtUtc]
+    );
 
-  // Insert new snapshot
-  const insertSql = `
-  INSERT INTO dbo.market_macro_anchors (
-    anchor_ticker,
-    anchor_name,
-    anchor_type,
-    current_price,
-    change_percent,
-    trend,
-    price_history,
-    collected_at_utc
-  )
-  VALUES (
-    @anchorTicker,
-    @anchorName,
-    @anchorType,
-    @currentPrice,
-    @changePercent,
-    @trend,
-    @priceHistory,
-    @collectedAtUtc
-  );
-  `;
+    const result = await client.query(
+      `INSERT INTO market_macro_anchors (
+        anchor_ticker, anchor_name, anchor_type,
+        current_price, change_percent, trend, price_history, collected_at_utc
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        anchor.anchorTicker,
+        anchor.anchorName,
+        anchor.anchorType,
+        anchor.currentPrice,
+        anchor.changePercent,
+        anchor.trend,
+        anchor.priceHistory,
+        anchor.collectedAtUtc,
+      ]
+    );
 
-  const result = await request.query(insertSql);
-  return result.rowsAffected?.[0] > 0 ? 'INSERT' : 'SKIP';
+    await client.query('COMMIT');
+    return result.rowCount > 0 ? 'INSERT' : 'SKIP';
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function insertCentralBankDecisionIfNew(pool, decision) {
-  const request = pool.request();
-  request.input('bank', sql.NVarChar(32), decision.bank);
-  request.input('title', sql.NVarChar(1024), decision.title);
-  request.input('summary', sql.NVarChar(sql.MAX), decision.summary);
-  request.input('url', sql.NVarChar(2048), decision.url || null);
-  request.input('source', sql.NVarChar(255), decision.source || null);
-  request.input('bias', sql.NVarChar(32), decision.bias || null);
-  request.input('hoursAgo', sql.Int, decision.hoursAgo);
-  request.input('publishedAtUtc', sql.DateTime2, decision.publishedAtUtc);
-  request.input('collectedAtUtc', sql.DateTime2, decision.collectedAtUtc);
-  request.input('dataSource', sql.NVarChar(64), decision.dataSource);
-  request.input('contentHash', sql.Char(64), decision.contentHash);
+  const existing = await pool.query(
+    `SELECT 1 FROM central_bank_decisions
+     WHERE bank = $1
+       AND (
+         content_hash = $2
+         OR (
+           title = $3
+           AND COALESCE(url, '') = COALESCE($4, '')
+           AND COALESCE(source, '') = COALESCE($5, '')
+         )
+       )
+     LIMIT 1`,
+    [decision.bank, decision.contentHash, decision.title, decision.url || null, decision.source || null]
+  );
 
-  const insertSql = `
-INSERT INTO dbo.central_bank_decisions (
-  bank,
-  title,
-  summary,
-  url,
-  source,
-  bias,
-  hours_ago,
-  published_at_utc,
-  collected_at_utc,
-  data_source,
-  content_hash
-)
-SELECT
-  @bank,
-  @title,
-  @summary,
-  @url,
-  @source,
-  @bias,
-  @hoursAgo,
-  @publishedAtUtc,
-  @collectedAtUtc,
-  @dataSource,
-  @contentHash
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM dbo.central_bank_decisions
-  WHERE bank = @bank
-    AND (
-      content_hash = @contentHash
-      OR (
-        title = @title
-        AND ISNULL(url, '') = ISNULL(@url, '')
-        AND ISNULL(source, '') = ISNULL(@source, '')
-      )
-    )
-);
-`;
+  if (existing.rowCount > 0) return 'SKIP';
 
-  const result = await request.query(insertSql);
-  return result.rowsAffected?.[0] > 0 ? 'INSERT' : 'SKIP';
+  try {
+    await pool.query(
+      `INSERT INTO central_bank_decisions (
+        bank, title, summary, url, source, bias,
+        hours_ago, published_at_utc, collected_at_utc, data_source, content_hash
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        decision.bank,
+        decision.title,
+        decision.summary,
+        decision.url || null,
+        decision.source || null,
+        decision.bias || null,
+        decision.hoursAgo,
+        decision.publishedAtUtc,
+        decision.collectedAtUtc,
+        decision.dataSource,
+        decision.contentHash,
+      ]
+    );
+    return 'INSERT';
+  } catch (err) {
+    if (err.code === '23505') return 'SKIP'; // unique constraint race condition
+    throw err;
+  }
 }
 
 async function insertTickerFundamentalIfNew(pool, fundamental) {
-  const request = pool.request();
-  request.input('ticker', sql.NVarChar(32), fundamental.ticker);
-  request.input('sector', sql.NVarChar(128), fundamental.sector);
-  request.input('marketCap', sql.BigInt, fundamental.marketCap);
-  request.input('peRatio', sql.Float, fundamental.peRatio);
-  request.input('eps', sql.Float, fundamental.eps);
-  request.input('roe', sql.Float, fundamental.roe);
-  request.input('fundamentalScore', sql.Float, fundamental.fundamentalScore);
-  request.input('tradingScore', sql.Float, fundamental.tradingScore);
-  request.input('return3m', sql.Float, fundamental.return3m);
-  request.input('rsi', sql.Float, fundamental.rsi);
-  request.input('volumeRatio', sql.Float, fundamental.volumeRatio);
-  request.input('shortPercent', sql.Float, fundamental.shortPercent ?? null);
-  request.input('shortIsMock', sql.Bit, fundamental.shortIsMock ?? null);
-  request.input('shortDataSource', sql.NVarChar(128), fundamental.shortDataSource ?? null);
-  request.input('collectedAtUtc', sql.DateTime2, fundamental.collectedAtUtc);
-  request.input('dataSource', sql.NVarChar(64), fundamental.dataSource);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  // Delete old records from the same day (keep only latest snapshot per day)
-  const deleteSql = `
-  DELETE FROM dbo.ticker_fundamentals
-  WHERE ticker = @ticker
-    AND CAST(collected_at_utc AS DATE) = CAST(@collectedAtUtc AS DATE);
-  `;
-  await request.query(deleteSql);
+    // Replace today's snapshot for this ticker
+    await client.query(
+      `DELETE FROM ticker_fundamentals
+       WHERE ticker = $1
+         AND collected_at_utc::date = $2::date`,
+      [fundamental.ticker, fundamental.collectedAtUtc]
+    );
 
-  // Insert new snapshot
-  const insertSql = `
-  INSERT INTO dbo.ticker_fundamentals (
-    ticker,
-    sector,
-    market_cap,
-    pe_ratio,
-    eps,
-    roe,
-    fundamental_score,
-    trading_score,
-    return_3m,
-    rsi,
-    volume_ratio,
-    short_percent,
-    short_is_mock,
-    short_data_source,
-    collected_at_utc,
-    data_source
-  )
-  VALUES (
-    @ticker,
-    @sector,
-    @marketCap,
-    @peRatio,
-    @eps,
-    @roe,
-    @fundamentalScore,
-    @tradingScore,
-    @return3m,
-    @rsi,
-    @volumeRatio,
-    @shortPercent,
-    @shortIsMock,
-    @shortDataSource,
-    @collectedAtUtc,
-    @dataSource
-  );
-  `;
+    const result = await client.query(
+      `INSERT INTO ticker_fundamentals (
+        ticker, sector, market_cap, pe_ratio, eps, roe,
+        fundamental_score, trading_score, return_3m, rsi, volume_ratio,
+        short_percent, short_is_mock, short_data_source,
+        collected_at_utc, data_source
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+      [
+        fundamental.ticker,
+        fundamental.sector,
+        fundamental.marketCap,
+        fundamental.peRatio,
+        fundamental.eps,
+        fundamental.roe,
+        fundamental.fundamentalScore,
+        fundamental.tradingScore,
+        fundamental.return3m,
+        fundamental.rsi,
+        fundamental.volumeRatio,
+        fundamental.shortPercent ?? null,
+        fundamental.shortIsMock ?? null,
+        fundamental.shortDataSource ?? null,
+        fundamental.collectedAtUtc,
+        fundamental.dataSource,
+      ]
+    );
 
-  const result = await request.query(insertSql);
-  return result.rowsAffected?.[0] > 0 ? 'INSERT' : 'SKIP';
+    await client.query('COMMIT');
+    return result.rowCount > 0 ? 'INSERT' : 'SKIP';
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function main() {
@@ -1027,7 +893,7 @@ async function main() {
     return;
   }
 
-  const pool = await sql.connect(resolveSqlConfig());
+  const pool = new Pool(resolvePoolConfig());
   try {
     await ensureSchema(pool);
 
@@ -1036,28 +902,24 @@ async function main() {
     let anchorsInserted = 0, anchorsSkipped = 0;
     let fundsInserted = 0, fundsSkipped = 0;
 
-    // Insert news
     for (const row of allNewsRows) {
       const action = await insertRowIfNew(pool, row);
       if (action === 'INSERT') newsInserted += 1;
       if (action === 'SKIP') newsSkipped += 1;
     }
 
-    // Insert central bank decisions
     for (const decision of allCentralBankDecisions) {
       const action = await insertCentralBankDecisionIfNew(pool, decision);
       if (action === 'INSERT') cbInserted += 1;
       if (action === 'SKIP') cbSkipped += 1;
     }
 
-    // Insert macro anchors
     for (const anchor of allMacroAnchors) {
       const action = await insertMacroAnchorIfNew(pool, anchor);
       if (action === 'INSERT') anchorsInserted += 1;
       if (action === 'SKIP') anchorsSkipped += 1;
     }
 
-    // Insert fundamentals
     for (const fundamental of allFundamentals) {
       const action = await insertTickerFundamentalIfNew(pool, fundamental);
       if (action === 'INSERT') fundsInserted += 1;
@@ -1070,7 +932,7 @@ async function main() {
     console.log(`  - Macro Anchors: INSERT=${anchorsInserted}, SKIP=${anchorsSkipped}`);
     console.log(`  - Fundamentals: INSERT=${fundsInserted}, SKIP=${fundsSkipped}`);
   } finally {
-    await pool.close();
+    await pool.end();
   }
 }
 
