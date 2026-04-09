@@ -31,6 +31,22 @@ let llmModelCache = {
   ollama: [...MODEL_PRESETS.ollama],
 };
 
+function resolveModel(provider, model) {
+  const resolvedProvider = resolveProvider(provider);
+  const requestedModel = String(model || '').trim();
+  const cachedModels = Array.from(new Set((llmModelCache[resolvedProvider] || []).filter(Boolean)));
+
+  if (resolvedProvider === 'ollama') {
+    return requestedModel || cachedModels[0] || DEFAULT_MODELS[resolvedProvider];
+  }
+
+  if (requestedModel && cachedModels.includes(requestedModel)) {
+    return requestedModel;
+  }
+
+  return cachedModels[0] || DEFAULT_MODELS[resolvedProvider];
+}
+
 function getAllowedProviders() {
   if (typeof window.getAuthState === 'function') {
     const providers = window.getAuthState()?.providers;
@@ -124,7 +140,7 @@ function updateModelOptions(provider) {
 
 function applyLlmConfig(provider, model) {
   const resolvedProvider = resolveProvider(provider);
-  const resolvedModel = String(model || '').trim() || DEFAULT_MODELS[resolvedProvider];
+  const resolvedModel = resolveModel(resolvedProvider, model);
 
   llmModelCache[resolvedProvider] = Array.from(new Set([
     ...(llmModelCache[resolvedProvider] || []),
