@@ -157,13 +157,14 @@
     modal.style.zIndex = '-1';
   }
 
-  function showAlgorithmSpec() {
+  async function showAlgorithmSpec() {
     const modal = document.getElementById('algorithm-modal');
     if (!modal) return;
     modal.style.visibility = 'visible';
     modal.style.opacity = '1';
     modal.style.zIndex = '9999';
     if (typeof closeInfoMenu === 'function') closeInfoMenu();
+    await injectRecommendationSpecMetadata();
   }
 
   // Dynamic injection helpers
@@ -214,9 +215,33 @@
     container.textContent = 'Optimizer parameters unavailable (no API)';
   }
 
+  async function injectRecommendationSpecMetadata() {
+    const container = document.getElementById('recommendation-live-meta');
+    if (!container) return;
+    container.textContent = 'Loading recommendation metadata...';
+
+    const [meta, health] = await Promise.all([
+      fetchJson('/api/weights/metadata'),
+      fetchJson('/api/health')
+    ]);
+
+    if (meta || health) {
+      const version = meta?.version || 'unknown';
+      const timestamp = meta?.timestamp || 'unknown';
+      const calibrated = meta?.calibrated === true ? 'yes' : (meta?.calibrated === false ? 'no' : 'unknown');
+      const provider = health?.llm?.provider || 'unknown';
+      const model = health?.llm?.model || 'unknown';
+      container.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--text2)"><strong>Weights</strong>: ${version} — ${timestamp}<br><strong>Calibrated:</strong> ${calibrated}<br><strong>Runtime LLM:</strong> ${provider} / ${model}</div>`;
+      return;
+    }
+
+    container.textContent = 'Recommendation metadata unavailable (no API)';
+  }
+
   // Expose for manual invocation
   window.injectBacktestMetadata = injectBacktestMetadata;
   window.injectPortfolioParams = injectPortfolioParams;
+  window.injectRecommendationSpecMetadata = injectRecommendationSpecMetadata;
 
   function hideAlgorithmSpec() {
     const modal = document.getElementById('algorithm-modal');

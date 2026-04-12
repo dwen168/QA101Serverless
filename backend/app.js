@@ -10,7 +10,7 @@ const { routeChatMessage } = require('./lib/chat');
 const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
 const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
 const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
-const { runPortfolioOptimization } = require('../skills/portfolio-optimization/scripts');
+const { runPortfolioOptimization, getOptimizationSettings } = require('../skills/portfolio-optimization/scripts');
 const { runBacktest } = require('../skills/backtesting/scripts');
 
 function createApp() {
@@ -255,16 +255,26 @@ function createApp() {
   // Provide optimizer parameters for frontend inspection
   app.get('/api/portfolio/params', (req, res) => {
     try {
-      // Derive defaults from portfolio optimization module logic
-      const macroRisk = 'MEDIUM';
-      const targetGrossWeight = macroRisk === 'HIGH' ? 0.9 : macroRisk === 'LOW' ? 0.55 : 0.75;
-      const baseMaxWeight = 0.25;
-      const assetCount = 10; // placeholder
-      const feasibleMinMaxWeight = (targetGrossWeight / Math.max(1, assetCount)) + 0.10;
-      const maxWeight = Math.max(baseMaxWeight, feasibleMinMaxWeight);
-      const riskAversion = macroRisk === 'HIGH' ? 10 : macroRisk === 'LOW' ? 4 : 6;
+      const rawHorizon = String(req.query?.timeHorizon || 'MEDIUM').toUpperCase();
+      const rawRisk = String(req.query?.macroRisk || 'MEDIUM').toUpperCase();
+      const parsedAssetCount = Number(req.query?.assetCount || 10);
 
-      res.json({ targetGrossWeight, maxWeight, iterations: 140, stepSize: 0.08, riskAversion });
+      const timeHorizon = ['SHORT', 'MEDIUM', 'LONG'].includes(rawHorizon) ? rawHorizon : 'MEDIUM';
+      const macroRisk = ['LOW', 'MEDIUM', 'HIGH'].includes(rawRisk) ? rawRisk : 'MEDIUM';
+      const assetCount = Number.isFinite(parsedAssetCount) ? Math.max(1, Math.min(100, Math.round(parsedAssetCount))) : 10;
+
+      const settings = getOptimizationSettings(timeHorizon, macroRisk, assetCount);
+      res.json({
+        timeHorizon,
+        macroRisk,
+        assetCount,
+        targetGrossWeight: settings.targetGrossWeight,
+        maxWeight: settings.maxWeight,
+        iterations: settings.iterations,
+        stepSize: settings.stepSize,
+        riskAversion: settings.riskAversion,
+        riskFreeRate: settings.riskFreeRate,
+      });
     } catch (err) {
       res.status(500).json({ error: 'failed to compute params' });
     }

@@ -1,4 +1,4 @@
-function showPortfolioSpec() {
+function renderPortfolioSpecModal() {
   const existing = document.getElementById('portfolio-modal');
   if (existing) {
     existing.style.visibility = 'visible';
@@ -28,7 +28,7 @@ function showPortfolioSpec() {
               <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Maximize risk-adjusted return subject to constraints</span>
             </div>
             <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.65">
-              Optimization may use score-derived weights, mean-variance optimization, or heuristic ranking. The UI exposes parameters for targetGrossWeight, maxWeight, iterations, and riskAversion.
+              Optimization uses constrained mean-variance with score-derived expected returns. The UI exposes parameters for targetGrossWeight, maxWeight, iterations, and riskAversion.
             </div>
           </div>
 
@@ -38,8 +38,8 @@ function showPortfolioSpec() {
               <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2)">
                 <li>compositeScore (from recommendation engine) mapped to 0-100 scale.</li>
                 <li>momentum, quality, riskAdjusted sub-scores (0-100) used in composite construction.</li>
-                <li>analyst upside %, sentiment score, ATR, and price history for covariance estimation.</li>
-                <li>user constraints: maxWeight, targetGrossWeight, sector limits.</li>
+                <li>analyst upside %, sentiment score, and price history for covariance estimation.</li>
+                <li>optimization constraints: per-asset maxWeight and total targetGrossWeight.</li>
               </ul>
             </div>
 
@@ -86,14 +86,14 @@ function showPortfolioSpec() {
             <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
               <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-bottom:8px">E. OUTPUTS &amp; JUSTIFICATION</div>
               <div style="font-size:12px;color:var(--text2);line-height:1.6">
-                Outputs: weights (fraction), suggested position sizes (shares, dollars), expected portfolio metrics, and per-ticker risk contributions. The UI also generates a short executive summary explaining top drivers.
+                Outputs: optimized allocation weights (%), expected portfolio metrics, and per-ticker risk contributions. The UI also generates an executive summary with macro/event overlays and key drivers.
               </div>
             </div>
 
             <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
               <div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:8px">F. LIMITATIONS &amp; NOTES</div>
               <div style="font-size:12px;color:var(--text2);line-height:1.6">
-                Covariance estimation uses historical returns from priceHistory and may be unstable for small sample sizes. Risk-parity/mean-variance choices are configurable; default heuristics exist for demo mode.
+                Covariance estimation uses historical returns from priceHistory and may be unstable for small sample sizes. Event and macro overlays adjust ranking inputs, but the optimizer remains constrained mean-variance.
               </div>
             </div>
           </div>
@@ -118,5 +118,10 @@ function hidePortfolioSpec() {
   modal.style.zIndex = '-1';
 }
 
-window.showPortfolioSpec = async function() { showPortfolioSpec(); await injectPortfolioParams(); };
+window.showPortfolioSpec = async function() {
+  renderPortfolioSpecModal();
+  if (typeof injectPortfolioParams === 'function') {
+    await injectPortfolioParams();
+  }
+};
 window.hidePortfolioSpec = hidePortfolioSpec;

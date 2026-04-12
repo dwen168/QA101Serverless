@@ -1142,5 +1142,6 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
 module.exports = {
   computeCompositeScore,
   computeCorrelationMatrix,
+  getOptimizationSettings,
   runPortfolioOptimization,
 };

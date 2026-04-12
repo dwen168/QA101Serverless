@@ -1,4 +1,4 @@
-function showBacktestSpec() {
+function renderBacktestSpecModal() {
   const existing = document.getElementById('backtest-modal');
   if (existing) {
     existing.style.visibility = 'visible';
@@ -67,10 +67,10 @@ function showBacktestSpec() {
               <div style="font-family:var(--mono);font-size:11px;color:var(--amber);margin-bottom:8px">C. EXECUTION ASSUMPTIONS</div>
 
               <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2)">
-                <li>Slippage: fixed-per-trade slippage (configurable). Backtest applies slippage to both entry and exit prices.</li>
-                <li>Position sizing: configurable per-backtest — options: fixed-dollar, fixed-fraction (of portfolio), or volatility-scaled.</li>
-                <li>Order fill model: assume market-on-open/close depending on backtest mode; partial fills not modelled.</li>
-                <li>Warmup: technical indicators require history warmup (MA50, MA200, ATR14). If insufficient, indicator flags set to unavailable and scoring falls back.</li>
+                  <li>Slippage: not explicitly modelled in current implementation.</li>
+                  <li>Position sizing: implicit full-capital compounding (single-position model).</li>
+                  <li>Order fill model: entries/exits use candle close price; partial fills are not modelled.</li>
+                  <li>Warmup: strategy-specific warmup bars are required before acting on signals (trade-recommendation uses longer warmup).</li>
               </ul>
             </div>
 
@@ -80,18 +80,19 @@ function showBacktestSpec() {
             <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-bottom:8px">D. SIGNAL-TO-ACTION MAPPING</div>
 
             <div style="font-size:12px;color:var(--text2);line-height:1.6">
-              Backtest maps the composite score into discrete actions using the same thresholds as live recommendations:
+              Backtest maps composite score into actions with a conservative band in the negative range:
               <div style="margin-top:8px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.6">
                 score &gt;= 6  → STRONG BUY<br>
                 score &gt;= 3  → BUY<br>
-                score &gt;= -2 → HOLD<br>
-                score &gt;= -5 → SELL<br>
-                else         → STRONG SELL
+                -2 ≤ score ≤ 2 → HOLD<br>
+                score &lt;= -6 → STRONG SELL<br>
+                score &lt;= -3 → SELL<br>
+                else → HOLD
               </div>
             </div>
 
             <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">
-              Note: ensure backtest code uses the same mapAction thresholds (score bounds) to avoid divergence — trade-recommendation/index.js provides the canonical mapping.
+              Note: these thresholds are implemented directly in backtesting signal generation and may differ slightly from live recommendation action mapping.
             </div>
 
             <div id="backtest-weights" style="margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.02);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.6">
@@ -105,9 +106,9 @@ function showBacktestSpec() {
               <div style="font-size:12px;color:var(--text2);line-height:1.6">
                 The backtest output includes:
                 <ul style="margin:6px 0 0 16px;color:var(--text2)">
-                  <li>Per-trade: entryDate, entryPrice, exitDate, exitPrice, entryATR, stopLossPrice, takeProfitPrice, pnlDollars, pnlPercent, exitReason.</li>
+                  <li>Per-trade: entryDate, entryPrice, exitDate, exitPrice, atrAtEntry, stopLossPrice, takeProfitPrice, pnlDollars, pnlPercent, reason.</li>
                   <li>Portfolio-level: balanceHistory, cumulativeReturn, maxDrawdown, winRate, avgWin/avgLoss.</li>
-                  <li>Signal engine metadata: weights version, timestamp, and which signals were available for each trade.</li>
+                  <li>Signal engine metadata: mode, coverage, and missing-context categories (portfolio-level metadata).</li>
                 </ul>
               </div>
             </div>
@@ -140,5 +141,10 @@ function hideBacktestSpec() {
   modal.style.zIndex = '-1';
 }
 
-window.showBacktestSpec = async function() { showBacktestSpec(); await injectBacktestMetadata(); };
+window.showBacktestSpec = async function() {
+  renderBacktestSpecModal();
+  if (typeof injectBacktestMetadata === 'function') {
+    await injectBacktestMetadata();
+  }
+};
 window.hideBacktestSpec = hideBacktestSpec;
