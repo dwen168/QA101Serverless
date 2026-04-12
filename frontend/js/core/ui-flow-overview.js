@@ -166,6 +166,58 @@
     if (typeof closeInfoMenu === 'function') closeInfoMenu();
   }
 
+  // Dynamic injection helpers
+  async function fetchJson(path) {
+    try {
+      const res = await fetch(path, {cache: 'no-cache'});
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async function injectBacktestMetadata() {
+    const container = document.getElementById('backtest-weights');
+    if (!container) return;
+    container.textContent = 'Loading weights metadata...';
+
+    // Try an internal API endpoint that serves weights metadata if available
+    const meta = await fetchJson('/api/weights/metadata');
+    if (meta) {
+      container.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--text2)"><strong>Weights</strong>: ${meta.version} — ${meta.timestamp}<br><strong>Calibrated:</strong> ${meta.calibrated ? 'yes' : 'no'}</div>`;
+      return;
+    }
+
+    // Fallback: try loading a JSON file from backend static path
+    const staticMeta = await fetchJson('/backend/lib/signal-weights.json');
+    if (staticMeta) {
+      const wm = { version: staticMeta.version || staticMeta.timestamp || 'unknown', timestamp: staticMeta.timestamp || 'unknown', calibrated: (staticMeta.model_metrics && !String(staticMeta.model_metrics.status || '').includes('Hardcoded')) };
+      container.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--text2)"><strong>Weights</strong>: ${wm.version} — ${wm.timestamp}<br><strong>Calibrated:</strong> ${wm.calibrated ? 'yes' : 'no'}</div>`;
+      return;
+    }
+
+    container.textContent = 'Weights metadata unavailable (no API/static file)';
+  }
+
+  async function injectPortfolioParams() {
+    const container = document.getElementById('portfolio-params');
+    if (!container) return;
+    container.textContent = 'Loading optimizer parameters...';
+
+    const params = await fetchJson('/api/portfolio/params');
+    if (params) {
+      container.innerHTML = `<div style="font-family:var(--mono);font-size:12px;color:var(--text2)">targetGrossWeight=${params.targetGrossWeight}, maxWeight=${params.maxWeight}, iterations=${params.iterations}, riskAversion=${params.riskAversion}</div>`;
+      return;
+    }
+
+    container.textContent = 'Optimizer parameters unavailable (no API)';
+  }
+
+  // Expose for manual invocation
+  window.injectBacktestMetadata = injectBacktestMetadata;
+  window.injectPortfolioParams = injectPortfolioParams;
+
   function hideAlgorithmSpec() {
     const modal = document.getElementById('algorithm-modal');
     if (!modal) return;
@@ -192,6 +244,8 @@
       if (event.key === 'Escape') {
         hideMindmap();
         hideAlgorithmSpec();
+        hideBacktestSpec();
+        hidePortfolioSpec();
       }
     });
   });

@@ -252,6 +252,24 @@ function createApp() {
     }
   });
 
+  // Provide optimizer parameters for frontend inspection
+  app.get('/api/portfolio/params', (req, res) => {
+    try {
+      // Derive defaults from portfolio optimization module logic
+      const macroRisk = 'MEDIUM';
+      const targetGrossWeight = macroRisk === 'HIGH' ? 0.9 : macroRisk === 'LOW' ? 0.55 : 0.75;
+      const baseMaxWeight = 0.25;
+      const assetCount = 10; // placeholder
+      const feasibleMinMaxWeight = (targetGrossWeight / Math.max(1, assetCount)) + 0.10;
+      const maxWeight = Math.max(baseMaxWeight, feasibleMinMaxWeight);
+      const riskAversion = macroRisk === 'HIGH' ? 10 : macroRisk === 'LOW' ? 4 : 6;
+
+      res.json({ targetGrossWeight, maxWeight, iterations: 140, stepSize: 0.08, riskAversion });
+    } catch (err) {
+      res.status(500).json({ error: 'failed to compute params' });
+    }
+  });
+
   app.post('/api/skills/backtesting', async (req, res) => {
     try {
       const result = await runBacktest({
@@ -282,6 +300,16 @@ function createApp() {
   });
 
   app.get('/api/health', (req, res) => {
+    // expose weights metadata via a simple endpoint for frontend inspection
+    const { getWeightsMetadata } = require('./lib/weights-loader');
+    app.get('/api/weights/metadata', (req2, res2) => {
+      try {
+        const meta = getWeightsMetadata();
+        res2.json(meta);
+      } catch (err) {
+        res2.status(500).json({ error: 'failed to read weights metadata' });
+      }
+    });
     const activeProvider = getActiveProvider();
     const allowedProviders = getAllowedProviders(req);
     const effectiveProvider = allowedProviders.includes(activeProvider)
