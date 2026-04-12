@@ -299,17 +299,18 @@ function createApp() {
     }
   });
 
+  // Weights metadata endpoint (top-level)
+  app.get('/api/weights/metadata', (req, res) => {
+    try {
+      const { getWeightsMetadata } = require('./lib/weights-loader');
+      const meta = getWeightsMetadata();
+      res.json(meta);
+    } catch (err) {
+      res.status(500).json({ error: 'failed to read weights metadata' });
+    }
+  });
+
   app.get('/api/health', (req, res) => {
-    // expose weights metadata via a simple endpoint for frontend inspection
-    const { getWeightsMetadata } = require('./lib/weights-loader');
-    app.get('/api/weights/metadata', (req2, res2) => {
-      try {
-        const meta = getWeightsMetadata();
-        res2.json(meta);
-      } catch (err) {
-        res2.status(500).json({ error: 'failed to read weights metadata' });
-      }
-    });
     const activeProvider = getActiveProvider();
     const allowedProviders = getAllowedProviders(req);
     const effectiveProvider = allowedProviders.includes(activeProvider)
