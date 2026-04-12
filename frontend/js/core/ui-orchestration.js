@@ -164,8 +164,33 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     setPillState(3, 'done');
     removeLoadingMsg();
     const rec = d3.recommendation;
+    // Fetch backtest-style (price+technical) decision for the latest bar
+    try {
+      const rbt = await apiFetch(`${API_BASE}/skills/trade-recommendation/backtest-action`, {
+        method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ priceHistory: marketData.priceHistory, timeHorizon }),
+      });
+      const dbt = await readApiJson(rbt);
+      if (rbt.ok && !dbt.error) {
+        rec.backtestView = dbt; // { score, action }
+      }
+    } catch (e) {
+      // ignore backtest-view failures
+    }
     addMessage('bot', `✓ <strong style="color:${rec.actionColor}">${rec.action}</strong> — ${rec.confidence}% confidence <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's3', label: '③ trade-recommendation' });
     renderRecommendation(rec, panel);
+    // Save a structured snapshot so the UI can be rehydrated (preserves interactivity)
+    try {
+      window.__lastAnalysisSnapshot = {
+        marketData: marketData || null,
+        llmAnalysis: llmAnalysis || null,
+        charts: charts || null,
+        edaInsights: edaInsights || null,
+        recommendation: rec || null,
+        timeHorizon: timeHorizon || 'MEDIUM',
+      };
+    } catch (e) {
+      window.__lastAnalysisSnapshot = null;
+    }
     addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
   } catch (err) {
     if (isAbortError(err)) return;
@@ -215,6 +240,12 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
 async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 'trade-recommendation', timeHorizon = 'MEDIUM') {
   const pipelineStartedAt = performance.now();
   const panel = document.getElementById('analysis-panel');
+  // Preserve the current analysis panel HTML so the user can return without re-querying
+  try {
+    window.__lastAnalysisPanelHtml = panel.innerHTML || '';
+  } catch (e) {
+    window.__lastAnalysisPanelHtml = '';
+  }
   panel.innerHTML = '';
   destroyCharts();
   resetPills();

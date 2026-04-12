@@ -9,7 +9,7 @@ const { loadSkills } = require('./lib/skill-loader');
 const { routeChatMessage } = require('./lib/chat');
 const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
 const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
-const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
+  const { runTradeRecommendation, runRecommendationBacktest, computeBacktestDecision } = require('../skills/trade-recommendation/scripts');
 const { runPortfolioOptimization, getOptimizationSettings } = require('../skills/portfolio-optimization/scripts');
 const { runBacktest } = require('../skills/backtesting/scripts');
 
@@ -236,6 +236,35 @@ function createApp() {
       res.json(result);
     } catch (error) {
       handleRouteError(res, error);
+    }
+  });
+
+  // Convenience endpoint: run a backtest using the trade-recommendation strategy
+  app.post('/api/skills/trade-recommendation/backtest', async (req, res) => {
+    try {
+      const result = await runRecommendationBacktest({
+        ticker: req.body.ticker,
+        startDate: req.body.startDate,
+        endDate: req.body.endDate,
+        initialCapital: req.body.initialCapital || 100000,
+        timeHorizon: req.body.timeHorizon || 'MEDIUM',
+        apiKey: config.alphaVantageApiKey,
+      });
+      res.json(result);
+    } catch (error) {
+      handleRouteError(res, error);
+    }
+  });
+
+  // Backtest-style decision for the latest bar (price + technicals only)
+  app.post('/api/skills/trade-recommendation/backtest-action', (req, res) => {
+    try {
+      const priceHistory = req.body.priceHistory;
+      const timeHorizon = String(req.body.timeHorizon || 'MEDIUM').toUpperCase();
+      const result = computeBacktestDecision({ priceHistory, timeHorizon });
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: String(err?.message || 'invalid request') });
     }
   });
 

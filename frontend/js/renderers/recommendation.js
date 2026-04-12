@@ -181,6 +181,7 @@ function renderRecommendation(rec, panel) {
       <div>
         <div class="rec-action" style="color:${rec.actionColor}">${rec.action}</div>
         <div class="rec-confidence" style="color:var(--text2)">${rec.ticker} · ${rec.confidence}% Confidence</div>
+        ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
         <div style="width:180px">
           <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
         </div>
@@ -203,6 +204,9 @@ function renderRecommendation(rec, panel) {
       <div style="text-align:right">
         <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
         <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
+        <div style="margin-top:8px">
+          <button type="button" class="run-rec-backtest" data-ticker="${rec.ticker}" style="cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px;color:var(--text3);font-family:var(--mono)">Run strategy backtest</button>
+        </div>
       </div>
     </div>
 
@@ -305,6 +309,38 @@ function renderRecommendation(rec, panel) {
     <div class="disclaimer">${rec.disclaimer}</div>
   `;
   panel.appendChild(recCard);
+
+  // Backtest button handler (runs the shared backtest pipeline and shows results in analysis panel)
+  const backtestBtn = recCard.querySelector('.run-rec-backtest');
+  if (backtestBtn) {
+    backtestBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const ticker = backtestBtn.getAttribute('data-ticker');
+      if (!ticker) return;
+      const endDate = new Date().toISOString().slice(0,10);
+      const start = new Date();
+      start.setFullYear(start.getFullYear() - 1);
+      const startDate = start.toISOString().slice(0,10);
+      if (typeof window.runBacktestPipeline === 'function') {
+        window.runBacktestPipeline(ticker, startDate, endDate, 'trade-recommendation', rec.timeHorizon || 'MEDIUM');
+      } else {
+        // fallback: call backtest endpoint directly
+        const panelMain = document.getElementById('analysis-panel');
+        panelMain.innerHTML = '';
+        addLoadingMsg('⟳ Running backtest...');
+        fetch(`${API_BASE}/skills/trade-recommendation/backtest`, {
+          method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ ticker, startDate, endDate, timeHorizon: rec.timeHorizon || 'MEDIUM' }),
+        }).then(r => r.json()).then(d => {
+          removeLoadingMsg();
+          if (d?.error) {
+            addMessage('bot', `Backtest failed: ${d.error}`);
+            return;
+          }
+          renderBacktestReport(d.backtestReport, panelMain);
+        }).catch(() => { removeLoadingMsg(); addMessage('bot', 'Backtest request failed.'); });
+      }
+    });
+  }
 
   recCard.addEventListener('click', (event) => {
     const toggle = event.target.closest('.tree-evidence-toggle');

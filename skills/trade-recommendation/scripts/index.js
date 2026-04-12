@@ -7,8 +7,9 @@ const { calculateATR, calculateVaR } = require('../../../backend/lib/technical-i
 const { normalizeTimeHorizon, getRecommendationProfile, buildObjectiveLensSummary } = require('./modules/profiles');
 const { computeConfidence, generateConfidenceExplanation } = require('./modules/confidence');
 const { findHistoricalPatterns } = require('./modules/historical');
-const { scoreSignals } = require('./modules/scoring');
+const { scoreSignals, scoreBacktestSnapshot } = require('./modules/scoring');
 const { buildDecisionTree } = require('./modules/decision-tree');
+const { runRecommendationBacktest } = require('./backtest');
 
 const skills = loadSkills();
 
@@ -182,5 +183,26 @@ module.exports = {
   getRecommendationProfile,
   mapAction,
   runTradeRecommendation,
+  computeBacktestDecision: undefined,
+  runRecommendationBacktest,
   scoreSignals,
 };
+
+// Compute a backtest-only decision (price + technicals only) for the latest bar
+function computeBacktestDecision({ priceHistory, timeHorizon = 'MEDIUM' } = {}) {
+  if (!Array.isArray(priceHistory) || priceHistory.length === 0) {
+    throw new Error('priceHistory is required and must be a non-empty array');
+  }
+  const idx = priceHistory.length - 1;
+  const score = scoreBacktestSnapshot(priceHistory, idx, timeHorizon);
+  let action;
+  if (score >= 6) action = 'STRONG BUY';
+  else if (score >= 3) action = 'BUY';
+  else if (score <= -6) action = 'STRONG SELL';
+  else if (score <= -3) action = 'SELL';
+  else action = 'HOLD';
+  return { score, action };
+}
+
+// attach to exports
+module.exports.computeBacktestDecision = computeBacktestDecision;

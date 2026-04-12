@@ -14,6 +14,48 @@ function renderBacktestReport(report, panel) {
   const section = document.createElement('div');
   section.className = 'section-divider fade-in';
   section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">④ backtesting</span><div class="section-divider-line"></div>`;
+  // Back button to restore previous analysis panel without re-querying
+  const backBtn = document.createElement('button');
+  backBtn.className = 'small-btn';
+  backBtn.style.marginLeft = '12px';
+  backBtn.textContent = 'Back';
+  backBtn.title = 'Return to previous analysis view';
+  backBtn.addEventListener('click', () => {
+    const panelMain = document.getElementById('analysis-panel');
+    const snap = window.__lastAnalysisSnapshot || null;
+    if (snap && (typeof renderMarketIntelligence === 'function' || typeof renderRecommendation === 'function')) {
+      // Clear and re-run the renderers using the saved structured snapshot
+      panelMain.innerHTML = '';
+      try { destroyCharts(); } catch (_) {}
+      try {
+        if (typeof renderMarketIntelligence === 'function') {
+          renderMarketIntelligence(snap.marketData, snap.llmAnalysis, panelMain, snap.marketData?.dataSource || null, false, null);
+        }
+      } catch (e) {
+        // ignore individual renderer failures
+      }
+      try {
+        if (typeof renderEDA === 'function') {
+          renderEDA(snap.charts || null, snap.edaInsights || null, snap.marketData || null, panelMain);
+        }
+      } catch (e) {}
+      try {
+        if (typeof renderRecommendation === 'function' && snap.recommendation) {
+          renderRecommendation(snap.recommendation, panelMain);
+        }
+      } catch (e) {}
+      // clear snapshot after restoring
+      window.__lastAnalysisSnapshot = null;
+    } else {
+      if (window.__lastAnalysisPanelHtml) {
+        panelMain.innerHTML = window.__lastAnalysisPanelHtml;
+        window.__lastAnalysisPanelHtml = null;
+      } else {
+        addMessage('bot', 'No previous analysis snapshot available. Please re-run the analysis.');
+      }
+    }
+  });
+  section.appendChild(backBtn);
   panel.appendChild(section);
 
   const sourceCard = document.createElement('div');
