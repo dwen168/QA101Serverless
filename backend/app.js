@@ -184,7 +184,32 @@ function createApp() {
     return values.length ? new Set(values) : null;
   };
 
+  const getAutoAllowedVercelOrigins = () => {
+    const candidates = [
+      process.env.VERCEL_URL,
+      process.env.VERCEL_BRANCH_URL,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    ]
+      .map((entry) => String(entry || '').trim())
+      .filter(Boolean)
+      .map((hostOrUrl) => {
+        if (/^https?:\/\//i.test(hostOrUrl)) return hostOrUrl;
+        return `https://${hostOrUrl}`;
+      })
+      .map((entry) => {
+        try {
+          return new URL(entry).origin;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    return new Set(candidates);
+  };
+
   const allowedCorsOrigins = parseCorsOrigins();
+  const autoAllowedVercelOrigins = getAutoAllowedVercelOrigins();
   const corsOptions = {
     origin(origin, callback) {
       if (!origin) {
@@ -197,6 +222,12 @@ function createApp() {
           callback(null, true);
           return;
         }
+
+        if (autoAllowedVercelOrigins.has(origin)) {
+          callback(null, true);
+          return;
+        }
+
         callback(new Error('CORS origin is not allowed'));
         return;
       }
