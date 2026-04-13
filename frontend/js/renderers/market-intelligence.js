@@ -1,5 +1,24 @@
 function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFallback = false, fallbackReason = null) {
   const normalizedDataSource = String(dataSource || '').toLowerCase();
+  const analystConsensus = d.analystConsensus || {};
+  const consensusStrongBuy = Number(analystConsensus.strongBuy || 0);
+  const consensusBuy = Number(analystConsensus.buy || 0);
+  const consensusHold = Number(analystConsensus.hold || 0);
+  const consensusSell = Number(analystConsensus.sell || 0);
+  const consensusStrongSell = Number(analystConsensus.strongSell || 0);
+  const targetLow = Number(analystConsensus.targetLow);
+  const targetHigh = Number(analystConsensus.targetHigh);
+  const targetMean = Number(analystConsensus.targetMean);
+  const upside = Number(analystConsensus.upside);
+  const hasValidTargetRange = Number.isFinite(targetLow)
+    && Number.isFinite(targetHigh)
+    && targetHigh > targetLow;
+  const targetPositionPct = hasValidTargetRange && Number.isFinite(Number(d.price))
+    ? Math.max(0, Math.min(100, ((Number(d.price) - targetLow) / (targetHigh - targetLow)) * 100))
+    : 50;
+  const targetMeanPct = hasValidTargetRange && Number.isFinite(targetMean)
+    ? Math.max(0, Math.min(100, ((targetMean - targetLow) / (targetHigh - targetLow)) * 100))
+    : 50;
   const changeClass = d.changePercent >= 0 ? 'up' : 'down';
   const changeSign = d.changePercent >= 0 ? '+' : '';
 
@@ -207,17 +226,20 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     <div class="intel-card">
       <div class="intel-label">Analyst Consensus</div>
       <div style="font-size:11px;margin-top:2px">
-        <span style="color:var(--green)">▲ Buy: ${d.analystConsensus.strongBuy + d.analystConsensus.buy}</span> ·
-        <span style="color:var(--amber)">Hold: ${d.analystConsensus.hold}</span> ·
-        <span style="color:var(--red)">▼ Sell: ${d.analystConsensus.sell + d.analystConsensus.strongSell}</span>
+        <span style="color:var(--green)">▲ Buy: ${consensusStrongBuy + consensusBuy}</span> ·
+        <span style="color:var(--amber)">Hold: ${consensusHold}</span> ·
+        <span style="color:var(--red)">▼ Sell: ${consensusSell + consensusStrongSell}</span>
       </div>
       <div style="margin-top:8px">
-        <div class="target-range-labels"><span>$${fmtNum(d.analystConsensus.targetLow)}</span><span>Target Mean: $${fmtNum(d.analystConsensus.targetMean)}</span><span>$${fmtNum(d.analystConsensus.targetHigh)}</span></div>
-        <div class="target-range-bar" style="margin:4px 0">
+        <div class="target-range-labels"><span>$${fmtNum(targetLow)}</span><span>Target Mean: $${fmtNum(targetMean)}</span><span>$${fmtNum(targetHigh)}</span></div>
+        <div class="target-range-bar target-range-bar-detailed" style="margin:8px 0 6px">
           <div class="target-range-fill" style="left:0;right:0"></div>
-          <div class="target-range-current" style="left:${((d.price - d.analystConsensus.targetLow) / (d.analystConsensus.targetHigh - d.analystConsensus.targetLow) * 100).toFixed(0)}%"></div>
+          <div class="target-range-point target-range-point-low" style="left:0%"><span class="target-range-point-label">Low $${fmtNum(targetLow)}</span></div>
+          <div class="target-range-point target-range-point-high" style="left:100%"><span class="target-range-point-label">High $${fmtNum(targetHigh)}</span></div>
+          <div class="target-range-point target-range-point-mean" style="left:${targetMeanPct.toFixed(1)}%"><span class="target-range-point-label target-range-point-label-mean">Mean $${fmtNum(targetMean)}</span></div>
+          <div class="target-range-current" style="left:${targetPositionPct.toFixed(1)}%"><span class="target-range-point-label target-range-point-label-current">Price $${fmtNum(d.price)}</span></div>
         </div>
-        <div style="font-size:10px;color:var(--text3);text-align:center">Upside: <span style="color:${d.analystConsensus.upside > 0 ? 'var(--green)' : 'var(--red)'}">${d.analystConsensus.upside > 0 ? '+' : ''}${d.analystConsensus.upside}%</span></div>
+        <div style="font-size:10px;color:var(--text3);text-align:center">Upside: <span style="color:${Number.isFinite(upside) ? (upside > 0 ? 'var(--green)' : 'var(--red)') : 'var(--text2)'}">${Number.isFinite(upside) ? `${upside > 0 ? '+' : ''}${upside}%` : 'N/A'}</span></div>
       </div>
     </div>
     <div class="intel-card">

@@ -59,7 +59,7 @@ function renderBacktestSpecModal() {
               </div>
 
               <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">
-                ATR multipliers by profile are identical to live recommendations (SHORT: SL=1.2, TP=2.0; MEDIUM: SL=1.5, TP=2.5; LONG: SL=2.0, TP=4.0).
+                ATR multipliers by profile are identical to live recommendations (SHORT: SL=1.2, TP=2.0; MEDIUM: SL=1.5, TP=2.5; LONG: SL=2.0, TP=4.0). Backtest then applies a dynamic TP expansion layer based on volatility ratio and entry-score strength, plus ATR-based trailing stop updates.
               </div>
             </div>
 
@@ -68,8 +68,9 @@ function renderBacktestSpecModal() {
 
               <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2)">
                   <li>Slippage: not explicitly modelled in current implementation.</li>
-                  <li>Position sizing: implicit full-capital compounding (single-position model).</li>
+                  <li>Position sizing: risk-based single-position model. Risk budget and max notional are horizon-specific (SHORT 0.8% risk / 35% max alloc, MEDIUM 1.0% / 50%, LONG 1.2% / 65%).</li>
                   <li>Order fill model: entries/exits use candle close price; partial fills are not modelled.</li>
+                  <li>Trailing stop: enabled after entry using horizon-specific ATR trailing multiplier (SHORT 1.0x, MEDIUM 1.2x, LONG 1.5x).</li>
                   <li>Warmup: strategy-specific warmup bars are required before acting on signals (trade-recommendation uses longer warmup).</li>
               </ul>
             </div>
@@ -80,19 +81,17 @@ function renderBacktestSpecModal() {
             <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-bottom:8px">D. SIGNAL-TO-ACTION MAPPING</div>
 
             <div style="font-size:12px;color:var(--text2);line-height:1.6">
-              Backtest maps composite score into actions with a conservative band in the negative range:
+              Backtest maps composite score using the same shared profile thresholds as recommendation (via getActionThresholds):
               <div style="margin-top:8px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.6">
-                score &gt;= 6  → STRONG BUY<br>
-                score &gt;= 3  → BUY<br>
+                SHORT/MEDIUM: score &gt;= 7 → STRONG BUY, score &gt;= 4 → BUY, score &lt;= -4 → SELL, score &lt;= -7 → STRONG SELL<br>
+                LONG: score &gt;= 8 → STRONG BUY, score &gt;= 5 → BUY, score &lt;= -5 → SELL, score &lt;= -8 → STRONG SELL<br>
                 -2 ≤ score ≤ 2 → HOLD<br>
-                score &lt;= -6 → STRONG SELL<br>
-                score &lt;= -3 → SELL<br>
                 else → HOLD
               </div>
             </div>
 
             <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">
-              Note: these thresholds are implemented directly in backtesting signal generation and may differ slightly from live recommendation action mapping.
+              Note: thresholds are now unified between recommendation and backtest to reduce behavior drift.
             </div>
 
             <div id="backtest-weights" style="margin-top:12px;padding:12px;border-radius:8px;background:rgba(255,255,255,0.02);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.6">
@@ -107,7 +106,8 @@ function renderBacktestSpecModal() {
                 The backtest output includes:
                 <ul style="margin:6px 0 0 16px;color:var(--text2)">
                   <li>Per-trade: entryDate, entryPrice, exitDate, exitPrice, atrAtEntry, stopLossPrice, takeProfitPrice, pnlDollars, pnlPercent, reason.</li>
-                  <li>Portfolio-level: balanceHistory, cumulativeReturn, maxDrawdown, winRate, avgWin/avgLoss.</li>
+                  <li>Portfolio-level: equity curve, cumulative return, max drawdown, win rate, avgWin/avgLoss, expectancyPct, expectancyDollars.</li>
+                  <li>Diagnostics: score-bucket stats (4-4.9 / 5-5.9 / 6+) and holding-period stats (1-5d / 6-20d / 21d+).</li>
                   <li>Signal engine metadata: mode, coverage, and missing-context categories (portfolio-level metadata).</li>
                 </ul>
               </div>

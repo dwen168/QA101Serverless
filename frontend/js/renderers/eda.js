@@ -1,4 +1,33 @@
 function renderEDA(charts, edaInsights, marketData, panel) {
+  const themeStyles = getComputedStyle(document.body);
+  const themeText3 = themeStyles.getPropertyValue('--text3').trim() || '#71717a';
+  const themeBorder = themeStyles.getPropertyValue('--border').trim() || 'rgba(255,255,255,0.06)';
+  const safeCharts = charts || {};
+  const consensus = marketData?.analystConsensus || {};
+  const fallbackAnalystChart = {
+    title: `${marketData?.ticker || 'Ticker'} - Analyst Consensus`,
+    data: {
+      labels: ['Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell'],
+      datasets: [{
+        data: [
+          Number(consensus.strongBuy || 0),
+          Number(consensus.buy || 0),
+          Number(consensus.hold || 0),
+          Number(consensus.sell || 0),
+          Number(consensus.strongSell || 0),
+        ],
+        backgroundColor: ['#10b981', '#6ee7b7', '#f59e0b', '#f87171', '#dc2626'],
+        borderWidth: 2,
+        borderColor: '#0a0f1e',
+      }],
+    },
+  };
+  const analystChart = safeCharts.analystChart || fallbackAnalystChart;
+  const rawRsi = Number.isFinite(Number(marketData?.rsi))
+    ? Number(marketData.rsi)
+    : Number(marketData?.technicalIndicators?.rsi);
+  const rsiValue = Number.isFinite(rawRsi) ? Math.max(0, Math.min(100, rawRsi)) : 50;
+  const rsiDisplay = Number.isFinite(rawRsi) ? rawRsi.toFixed(1) : 'N/A';
   const priceHistoryPoints = Array.isArray(marketData.priceHistory) ? marketData.priceHistory.length : 0;
   const rawHistorySource = String(marketData.priceHistorySource || marketData.dataSource || 'unknown').toLowerCase();
   const historySourceLabelMap = {
@@ -61,10 +90,10 @@ function renderEDA(charts, edaInsights, marketData, panel) {
 
   const chartDefaults = {
     responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: '#7a8fb8', font: { size: 11, family: "'DM Mono', monospace" }, boxWidth: 12, padding: 8 } } },
+    plugins: { legend: { labels: { color: themeText3, font: { size: 11, family: "'DM Mono', monospace" }, boxWidth: 12, padding: 8 } } },
     scales: {
-      x: { ticks: { color: '#3d5080', font: { size: 10, family: "'DM Mono', monospace" }, maxRotation: 0, maxTicksLimit: 8 }, grid: { color: 'rgba(59,130,246,0.04)' }, border: { color: 'rgba(59,130,246,0.1)' } },
-      y: { ticks: { color: '#3d5080', font: { size: 10, family: "'DM Mono', monospace" } }, grid: { color: 'rgba(59,130,246,0.04)' }, border: { color: 'rgba(59,130,246,0.1)' } },
+      x: { ticks: { color: themeText3, font: { size: 10, family: "'DM Mono', monospace" }, maxRotation: 0, maxTicksLimit: 8 }, grid: { color: 'rgba(59,130,246,0.04)' }, border: { color: themeBorder } },
+      y: { ticks: { color: themeText3, font: { size: 10, family: "'DM Mono', monospace" } }, grid: { color: 'rgba(59,130,246,0.04)' }, border: { color: themeBorder } },
     },
   };
 
@@ -107,11 +136,11 @@ function renderEDA(charts, edaInsights, marketData, panel) {
     const tvChart = LightweightCharts.createChart(tvContainer, {
       autoSize: true,
       height: 280,
-      layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#7a8fb8', fontFamily: "'DM Mono', monospace", fontSize: 11 },
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: themeText3, fontFamily: "'DM Mono', monospace", fontSize: 11 },
       grid: { vertLines: { color: 'rgba(59,130,246,0.04)' }, horzLines: { color: 'rgba(59,130,246,0.04)' } },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-      rightPriceScale: { borderColor: 'rgba(59,130,246,0.1)' },
-      timeScale: { borderColor: 'rgba(59,130,246,0.1)', timeVisible: false },
+      rightPriceScale: { borderColor: themeBorder },
+      timeScale: { borderColor: themeBorder, timeVisible: false },
       handleScroll: true, handleScale: true,
     });
 
@@ -212,7 +241,7 @@ function renderEDA(charts, edaInsights, marketData, panel) {
   const chartGrid = document.createElement('div');
   chartGrid.className = 'chart-grid fade-in';
   chartGrid.innerHTML = `
-    <div class="chart-wrap"><div class="chart-title">${charts.analystChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-analyst"></canvas></div></div>
+    <div class="chart-wrap"><div class="chart-title">${analystChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-analyst"></canvas></div></div>
     <div class="chart-wrap">
       <div class="chart-title">${marketData.ticker} - News Sentiment Heatmap</div>
       <div class="news-heatmap-summary">Overall Sentiment: <strong style="color:${overallSentiment > 0.1 ? 'var(--green)' : overallSentiment < -0.1 ? 'var(--red)' : 'var(--amber)'}">${overallSentiment > 0 ? '+' : ''}${overallSentiment.toFixed(2)} (${overallSentimentLabel})</strong></div>
@@ -227,8 +256,25 @@ function renderEDA(charts, edaInsights, marketData, panel) {
   `;
   panel.appendChild(chartGrid);
   setTimeout(() => {
-    const ctxA = document.getElementById('chart-analyst').getContext('2d');
-    currentCharts['analyst'] = new Chart(ctxA, { type: 'doughnut', data: charts.analystChart.data, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#7a8fb8', font: { size: 10, family: "'DM Mono', monospace" }, boxWidth: 10, padding: 6 } } }, cutout: '65%' } });
+    const analystCanvas = document.getElementById('chart-analyst');
+    const ctxA = analystCanvas?.getContext('2d');
+    if (ctxA) {
+      currentCharts.analyst = new Chart(ctxA, {
+        type: 'doughnut',
+        data: analystChart.data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: themeText3, font: { size: 10, family: "'DM Mono', monospace" }, boxWidth: 10, padding: 6 },
+            },
+          },
+          cutout: '65%',
+        },
+      });
+    }
     const heatmapHover = document.getElementById('news-heatmap-hover');
     const heatmapCells = Array.from(document.querySelectorAll('#news-heatmap .news-heatmap-cell'));
     heatmapCells.forEach((cell) => {
@@ -245,16 +291,16 @@ function renderEDA(charts, edaInsights, marketData, panel) {
   // RSI gauge (standalone)
   const rsiCard = document.createElement('div');
   rsiCard.className = 'chart-wrap fade-in';
-  const rsiColor = marketData.rsi > 70 ? 'var(--red)' : marketData.rsi < 30 ? 'var(--cyan)' : 'var(--green)';
-  const rsiLabel = marketData.rsi > 70 ? 'OVERBOUGHT' : marketData.rsi < 30 ? 'OVERSOLD' : 'NEUTRAL';
+  const rsiColor = rsiValue > 70 ? 'var(--red)' : rsiValue < 30 ? 'var(--cyan)' : 'var(--green)';
+  const rsiLabel = rsiValue > 70 ? 'OVERBOUGHT' : rsiValue < 30 ? 'OVERSOLD' : 'NEUTRAL';
   rsiCard.style.cssText = 'display:flex;flex-direction:column;justify-content:center';
   rsiCard.innerHTML = `
     <div class="chart-title">RSI Indicator</div>
     <div class="rsi-gauge">
-      <div class="rsi-number" style="color:${rsiColor}">${marketData.rsi}</div>
+      <div class="rsi-number" style="color:${rsiColor}">${rsiDisplay}</div>
       <div class="rsi-label" style="background:rgba(0,0,0,0.2);color:${rsiColor}">${rsiLabel}</div>
       <div class="rsi-bar-track" style="width:100%">
-        <div class="rsi-marker" style="left:${marketData.rsi}%"></div>
+        <div class="rsi-marker" style="left:${rsiValue}%"></div>
       </div>
       <div style="display:flex;justify-content:space-between;width:100%;font-size:10px;color:var(--text3);font-family:var(--mono)"><span>0</span><span>30</span><span>70</span><span>100</span></div>
     </div>
