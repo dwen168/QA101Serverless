@@ -7,7 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/main.css">
 <script defer src="/_vercel/insights/script.js"></script>
 <style>
@@ -26,87 +27,96 @@
 <body>
 
 <header>
-  <div class="logo">
-    <div class="logo-icon">
-      <svg viewBox="0 0 16 16"><path d="M8 1l2 5h5l-4 3 1.5 5L8 11l-4.5 3L5 9 1 6h5z"/></svg>
+  <div class="brand-block">
+    <div class="logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 16 16"><path d="M8 1l2 5h5l-4 3 1.5 5L8 11l-4.5 3L5 9 1 6h5z"/></svg>
+      </div>
+      <div class="logo-copy">
+        <span class="logo-text">Quant<span>Bot</span></span>
+        <span class="logo-caption">AI Equity Research Copilot</span>
+      </div>
     </div>
-    <span class="logo-text">Quant<span>Bot</span></span>
+    <p class="brand-summary">Live market context, quantitative signal analysis, and explainable share recommendations in one workspace.</p>
   </div>
   <div class="header-right">
-    <div class="llm-switcher">
-      <span class="llm-switcher-label">LLM</span>
-      <select id="llm-provider" class="llm-provider-select" onchange="handleLlmProviderChange()">
-        <option value="deepseek">DeepSeek</option>
-        <option value="gemini">Gemini</option>
-        <option value="ollama">Ollama</option>
-      </select>
-      <select id="llm-model" class="llm-model-input" onchange="handleLlmModelChange()"></select>
-      <span class="llm-status" id="llm-status">loading...</span>
-    </div>
-    <div class="auth-controls" id="auth-controls">
-      <span class="auth-user" id="auth-user">Guest</span>
-      <button class="auth-btn" id="auth-btn" onclick="handleAuthAction()">Login</button>
-    </div>
-    
-    <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
-      <svg id="theme-icon-dark" viewBox="0 0 24 24" style="display:none"><path d="M12 21a9 9 0 0 1-6.36-15.36 1 1 0 0 1 1.09-.21 1 1 0 0 1 .54.91A7.05 7.05 0 0 0 14.33 13.4 7.05 7.05 0 0 0 21.4 6.3 1 1 0 0 1 22.3 5.75a1 1 0 0 1 .22 1.09 9 9 0 0 1-10.52 14.16z"/></svg>
-      <svg id="theme-icon-light" viewBox="0 0 24 24"><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-14a1 1 0 0 1 1-1V1a1 1 0 0 1-2 0v2a1 1 0 0 1 1 1zm0 20a1 1 0 0 1 1-1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zM4 12a1 1 0 0 1-1 1H1a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1zm20 0a1 1 0 0 1-1 1h-2a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1zM6.34 6.34a1 1 0 0 1-.7-.29l-1.42-1.42a1 1 0 0 1 1.42-1.42l1.42 1.42a1 1 0 0 1-.71 1.71zm12.73 12.73a1 1 0 0 1-.7-.29l-1.42-1.42a1 1 0 0 1 1.42-1.42l1.42 1.42a1 1 0 0 1-.71 1.71zm-12.73 0a1 1 0 0 1-.7-1.71l1.42-1.42a1 1 0 0 1 1.41 1.42l-1.41 1.42a1 1 0 0 1-.72.29zm12.73-12.73a1 1 0 0 1-.71-1.71l1.42-1.42a1 1 0 0 1 1.41 1.42l-1.41 1.42a1 1 0 0 1-.71.29z"/></svg>
-    </button>
-    <div class="skill-pills">
-      <span class="skill-pill" id="pill-1">① market-intelligence</span>
-      <span class="skill-pill" id="pill-2">② eda-visual-analysis</span>
-      <span class="skill-pill" id="pill-3">③ trade-recommendation</span>
-      <span class="skill-pill" id="pill-4">④ backtesting</span>
-    </div>
-    <div class="export-menu">
-      <button class="export-btn" id="export-btn" onclick="toggleExportMenu(event)">
-        <span>Export</span>
-        <span class="caret">▼</span>
-      </button>
-      <div class="export-dropdown" id="export-dropdown">
-        <button class="export-option" onclick="exportCurrentView('html')">
-          <strong>Save as HTML</strong>
-          <span>.html</span>
-        </button>
-        <button class="export-option" onclick="exportCurrentView('pdf')">
-          <strong>Save as PDF</strong>
-          <span>.pdf</span>
-        </button>
+    <div class="header-status-group">
+      <div class="llm-switcher">
+        <span class="llm-switcher-label">LLM</span>
+        <select id="llm-provider" class="llm-provider-select" onchange="handleLlmProviderChange()">
+          <option value="deepseek">DeepSeek</option>
+          <option value="gemini">Gemini</option>
+          <option value="ollama">Ollama</option>
+        </select>
+        <select id="llm-model" class="llm-model-input" onchange="handleLlmModelChange()"></select>
+        <span class="llm-status" id="llm-status">loading...</span>
       </div>
-    </div>
-    <div class="export-menu">
-      <button class="export-btn" id="reports-menu-btn" onclick="toggleReportsMenu(event)">
-        <span>Reports</span>
-        <span class="caret">▼</span>
+      <div class="auth-controls" id="auth-controls">
+        <span class="auth-user" id="auth-user">Guest</span>
+        <button class="auth-btn" id="auth-btn" onclick="handleAuthAction()">Login</button>
+      </div>
+      <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
+        <svg id="theme-icon-dark" viewBox="0 0 24 24" style="display:none"><path d="M12 21a9 9 0 0 1-6.36-15.36 1 1 0 0 1 1.09-.21 1 1 0 0 1 .54.91A7.05 7.05 0 0 0 14.33 13.4 7.05 7.05 0 0 0 21.4 6.3 1 1 0 0 1 22.3 5.75a1 1 0 0 1 .22 1.09 9 9 0 0 1-10.52 14.16z"/></svg>
+        <svg id="theme-icon-light" viewBox="0 0 24 24"><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-14a1 1 0 0 1 1-1V1a1 1 0 0 1-2 0v2a1 1 0 0 1 1 1zm0 20a1 1 0 0 1 1-1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zM4 12a1 1 0 0 1-1 1H1a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1zm20 0a1 1 0 0 1-1 1h-2a1 1 0 0 1 0-2h2a1 1 0 0 1 1 1zM6.34 6.34a1 1 0 0 1-.7-.29l-1.42-1.42a1 1 0 0 1 1.42-1.42l1.42 1.42a1 1 0 0 1-.71 1.71zm12.73 12.73a1 1 0 0 1-.7-.29l-1.42-1.42a1 1 0 0 1 1.42-1.42l1.42 1.42a1 1 0 0 1-.71 1.71zm-12.73 0a1 1 0 0 1-.7-1.71l1.42-1.42a1 1 0 0 1 1.41 1.42l-1.41 1.42a1 1 0 0 1-.72.29zm12.73-12.73a1 1 0 0 1-.71-1.71l1.42-1.42a1 1 0 0 1 1.41 1.42l-1.41 1.42a1 1 0 0 1-.71.29z"/></svg>
       </button>
-      <div class="export-dropdown" id="reports-menu-dropdown">
-        <div id="reports-menu-list" class="reports-menu-list">
-          <div class="reports-menu-empty">Loading...</div>
+    </div>
+    <div class="header-actions-group">
+      <div class="skill-pills">
+        <span class="skill-pill" id="pill-1">Market Intelligence</span>
+        <span class="skill-pill" id="pill-2">EDA Analysis</span>
+        <span class="skill-pill" id="pill-3">Trade Signals</span>
+        <span class="skill-pill" id="pill-4">Backtesting</span>
+      </div>
+      <div class="export-menu">
+        <button class="export-btn" id="export-btn" onclick="toggleExportMenu(event)">
+          <span>Export</span>
+          <span class="caret">▼</span>
+        </button>
+        <div class="export-dropdown" id="export-dropdown">
+          <button class="export-option" onclick="exportCurrentView('html')">
+            <strong>Save as HTML</strong>
+            <span>.html</span>
+          </button>
+          <button class="export-option" onclick="exportCurrentView('pdf')">
+            <strong>Save as PDF</strong>
+            <span>.pdf</span>
+          </button>
         </div>
       </div>
-    </div>
-    <div class="export-menu" style="margin-left:8px">
-      <button class="export-btn" id="info-btn" onclick="toggleInfoMenu(event)">
-        <span>How it works</span>
-        <span class="caret">▼</span>
-      </button>
-      <div class="export-dropdown" id="info-dropdown">
-        <button class="export-option" onclick="showMindmap()">
-          <strong>Recommendation Flow</strong>
-          <span>High-Level View</span>
+      <div class="export-menu">
+        <button class="export-btn" id="reports-menu-btn" onclick="toggleReportsMenu(event)">
+          <span>Reports</span>
+          <span class="caret">▼</span>
         </button>
-        <button class="export-option" onclick="showAlgorithmSpec()">
-          <strong>Recommendation Algorithm</strong>
-          <span>Detailed Spec</span>
+        <div class="export-dropdown" id="reports-menu-dropdown">
+          <div id="reports-menu-list" class="reports-menu-list">
+            <div class="reports-menu-empty">Loading...</div>
+          </div>
+        </div>
+      </div>
+      <div class="export-menu">
+        <button class="export-btn" id="info-btn" onclick="toggleInfoMenu(event)">
+          <span>How it works</span>
+          <span class="caret">▼</span>
         </button>
-        <button class="export-option" onclick="showBacktestSpec()">
-          <strong>Backtest Algorithm</strong>
-          <span>Backtesting Spec & Execution</span>
-        </button>
-        <button class="export-option" onclick="showPortfolioSpec()">
-          <strong>Portfolio Optimization</strong>
-          <span>Optimization Spec</span>
-        </button>
+        <div class="export-dropdown" id="info-dropdown">
+          <button class="export-option" onclick="showMindmap()">
+            <strong>Recommendation Flow</strong>
+            <span>High-Level View</span>
+          </button>
+          <button class="export-option" onclick="showAlgorithmSpec()">
+            <strong>Recommendation Algorithm</strong>
+            <span>Detailed Spec</span>
+          </button>
+          <button class="export-option" onclick="showBacktestSpec()">
+            <strong>Backtest Algorithm</strong>
+            <span>Backtesting Spec &amp; Execution</span>
+          </button>
+          <button class="export-option" onclick="showPortfolioSpec()">
+            <strong>Portfolio Optimization</strong>
+            <span>Optimization Spec</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -116,22 +126,47 @@
 
   <!-- Chat Panel -->
   <div class="chat-panel">
+    <div class="chat-panel-top">
+      <div class="workspace-card">
+        <div class="workspace-kicker">Research Workspace</div>
+        <div class="workspace-title-row">
+          <h1 class="workspace-title">Analyze a stock, compare holdings, optimize a portfolio, or run a backtest.</h1>
+          <span class="workspace-live-indicator">Live market workflow</span>
+        </div>
+        <p class="workspace-description">QuantBot combines internet data, API-driven market inputs, quantitative analysis, and explainable outputs so users can move from a question to an investable view faster.</p>
+        <div class="workspace-metrics">
+          <div class="workspace-metric">
+            <span class="workspace-metric-label">Workflows</span>
+            <strong>Single-stock analysis</strong>
+          </div>
+          <div class="workspace-metric">
+            <span class="workspace-metric-label">Portfolio</span>
+            <strong>Comparison and optimization</strong>
+          </div>
+          <div class="workspace-metric">
+            <span class="workspace-metric-label">Outputs</span>
+            <strong>Recommendations and backtests</strong>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="chat-messages" id="chat-messages">
       <div class="msg bot fade-in">
         <div class="msg-bubble">
-          👋 Hi! I'm <strong>QuantBot</strong>, your AI quantitative analyst.<br><br>
-          I use <strong>5 skills</strong> for stock, portfolio, and backtest analysis:<br>
-          • <strong style="color:var(--cyan)">Market Intelligence</strong> — trends, news, sentiment<br>
-          • <strong style="color:var(--green)">EDA Visual Analysis</strong> — charts & statistics<br>
-          • <strong style="color:var(--amber)">Trade Recommendation</strong> — buy/hold/sell<br>
-          • <strong style="color:var(--cyan)">Portfolio Optimization</strong> — ranking, allocation, diversification<br>
-          • <strong style="color:var(--green)">Backtesting</strong> — historical strategy validation<br><br>
-          Try: <em>"Analyze NVDA"</em>, <em>"Optimize portfolio AAPL, MSFT, NVDA"</em>, or <em>"Backtest AAPL from 2025-01-01 to 2026-03-18"</em>
+          <strong>QuantBot</strong> is built for stock research, portfolio analysis, and strategy validation.<br><br>
+          It can fetch market context from internet and API sources, run quantitative analysis, compare multiple holdings, and turn the evidence into a transparent <strong>buy / hold / sell</strong> style recommendation.<br><br>
+          Try prompts like <em>"Analyze NVDA"</em>, <em>"Compare CBA and WBC"</em>, <em>"Optimize a portfolio with AAPL, MSFT, NVDA"</em>, or <em>"Backtest AAPL from 2025-01-01 to 2026-03-18"</em>.
         </div>
         <span class="msg-time">QuantBot</span>
       </div>
     </div>
     <div class="chat-input-area">
+      <div class="composer-header">
+        <div>
+          <div class="composer-title">Start an analysis</div>
+          <div class="composer-subtitle">Use plain language or tap a starter below.</div>
+        </div>
+      </div>
       <div class="quick-btns" id="quick-btns">
         <button class="quick-btn" onclick="quickAnalyze('AAPL')">AAPL</button>
         <button class="quick-btn" onclick="quickAnalyze('NVDA')">NVDA</button>
@@ -157,8 +192,51 @@
   <!-- Analysis Panel -->
   <div class="analysis-panel" id="analysis-panel">
     <div class="welcome-state" id="welcome-state">
-      <div class="w-icon">📊</div>
-      <p>Ask QuantBot to analyze a stock, optimize a portfolio, or run a backtest to see<br>charts, insights, trade recommendations, and historical performance.</p>
+      <div class="welcome-shell">
+        <div class="welcome-card welcome-card-primary">
+          <div class="welcome-badge">Professional Research View</div>
+          <div class="welcome-copy">
+            <h2>Analysis appears here after each request.</h2>
+            <p>Use the chat panel to investigate a share, test a trading idea, or ask for a portfolio recommendation. QuantBot will surface price structure, quant signals, risk framing, and a plain-English recommendation.</p>
+          </div>
+          <div class="welcome-highlights">
+            <div class="welcome-highlight">
+              <span class="welcome-highlight-label">Market context</span>
+              <strong>News, sentiment, and macro backdrop</strong>
+            </div>
+            <div class="welcome-highlight">
+              <span class="welcome-highlight-label">Quant engine</span>
+              <strong>Technical, valuation, and confidence scoring</strong>
+            </div>
+            <div class="welcome-highlight">
+              <span class="welcome-highlight-label">Decision support</span>
+              <strong>Explainable recommendation with risks</strong>
+            </div>
+          </div>
+        </div>
+        <div class="welcome-grid">
+          <div class="welcome-card">
+            <span class="welcome-card-kicker">Single Share</span>
+            <h3>Equity deep dive</h3>
+            <p>Review trend, volatility, sentiment, analyst targets, and signal alignment in one report.</p>
+          </div>
+          <div class="welcome-card">
+            <span class="welcome-card-kicker">Portfolio</span>
+            <h3>Allocation ideas</h3>
+            <p>Compare multiple names, rank them, and surface diversification-aware positioning.</p>
+          </div>
+          <div class="welcome-card">
+            <span class="welcome-card-kicker">Backtest</span>
+            <h3>Historical validation</h3>
+            <p>Replay a strategy window to inspect performance, drawdowns, and decision robustness.</p>
+          </div>
+          <div class="welcome-card">
+            <span class="welcome-card-kicker">Prompt starter</span>
+            <h3>"Analyze ASX:CBA"</h3>
+            <p>Natural-language prompts work well for Australian and US share analysis workflows.</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -323,9 +401,9 @@
             <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-bottom:8px">E. ACTION MAPPING</div>
             <div style="font-size:12px;color:var(--text2);line-height:1.55">The composite score is mapped into a recommendation band after all adjusted signals are summed.</div>
             <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.7">
-              SHORT/MEDIUM: score >= 7 -> STRONG BUY, score >= 4 -> BUY, score <= -4 -> SELL, score <= -7 -> STRONG SELL<br>
-              LONG: score >= 8 -> STRONG BUY, score >= 5 -> BUY, score <= -5 -> SELL, score <= -8 -> STRONG SELL<br>
-              -2 <= score <= 2 -> HOLD<br>
+              SHORT/MEDIUM: score &gt;= 7 -&gt; STRONG BUY, score &gt;= 4 -&gt; BUY, score &lt;= -4 -&gt; SELL, score &lt;= -7 -&gt; STRONG SELL<br>
+              LONG: score &gt;= 8 -&gt; STRONG BUY, score &gt;= 5 -&gt; BUY, score &lt;= -5 -&gt; SELL, score &lt;= -8 -&gt; STRONG SELL<br>
+              -2 &lt;= score &lt;= 2 -&gt; HOLD<br>
               else -> HOLD
             </div>
             <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.55">Mapping is centralized in shared profiles (getActionThresholds/mapActionFromScore) and reused by both recommendation and backtest. The UI then shows grouped attribution plus a separate bearish-pressure summary (not double-counted as another pillar).</div>
@@ -365,9 +443,9 @@
               <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Final confidence is clipped to 30-92</span>
             </div>
             <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.75">
-              if alignment < 0.3 and totalMagnitude >= 5: -6 conflict penalty<br>
-              if signalCount <= 3: -4<br>
-              if signalCount >= 10: +2<br>
+              if alignment &lt; 0.3 and totalMagnitude &gt;= 5: -6 conflict penalty<br>
+              if signalCount &lt;= 3: -4<br>
+              if signalCount &gt;= 10: +2<br>
               if macroRisk == HIGH: -8<br>
               if macroRisk == LOW: +3<br>
               finalConfidence = clamp(rawConfidence, 30, 92)

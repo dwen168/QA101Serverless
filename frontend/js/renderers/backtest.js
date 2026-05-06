@@ -12,6 +12,7 @@ function renderBacktestReport(report, panel) {
   const scoreBucketStats = Array.isArray(metrics.scoreBucketStats) ? metrics.scoreBucketStats : [];
   const holdingPeriodStats = Array.isArray(metrics.holdingPeriodStats) ? metrics.holdingPeriodStats : [];
   const dataSource = String(report.dataSource || '').toLowerCase();
+  const fallbackReason = String(report.fallbackReason || '').trim();
   const pickDateString = (value) => {
     if (value == null) return null;
     if (value instanceof Date) return value.toISOString().slice(0, 10);
@@ -46,9 +47,9 @@ function renderBacktestReport(report, panel) {
   section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">④ backtesting</span><div class="section-divider-line"></div>`;
   // Back button to restore previous analysis panel without re-querying
   const backBtn = document.createElement('button');
-  backBtn.className = 'small-btn';
-  backBtn.style.marginLeft = '12px';
-  backBtn.textContent = 'Back';
+  backBtn.className = 'analysis-back-btn';
+  backBtn.type = 'button';
+  backBtn.innerHTML = `<span class="analysis-back-btn-icon">←</span><span>Back to analysis</span>`;
   backBtn.title = 'Return to previous analysis view';
   backBtn.addEventListener('click', () => {
     const panelMain = document.getElementById('analysis-panel');
@@ -93,23 +94,31 @@ function renderBacktestReport(report, panel) {
   const sourceCard = document.createElement('div');
   sourceCard.className = 'fade-in';
   const isLive = dataSource === 'alpha-vantage' || dataSource === 'yahoo-finance';
+  const isMock = dataSource === 'mock' || dataSource === 'mock-history';
   const isUnavailable = dataSource === 'unavailable' || !dataSource;
-  const statusLabel = isLive ? 'LIVE' : isUnavailable ? 'UNAVAILABLE' : 'MIXED';
+  const statusLabel = isLive ? 'LIVE' : isMock ? 'MOCK' : isUnavailable ? 'UNAVAILABLE' : 'MIXED';
   const sourceLabel = dataSource || 'unknown';
-  const color = isLive ? 'var(--green)' : isUnavailable ? 'var(--amber)' : 'var(--cyan)';
+  const color = isLive ? 'var(--green)' : isMock ? 'var(--amber)' : isUnavailable ? 'var(--amber)' : 'var(--cyan)';
   const bg = isLive
     ? 'rgba(16,185,129,0.1)'
+    : isMock
+      ? 'rgba(245,158,11,0.12)'
     : isUnavailable
       ? 'rgba(245,158,11,0.1)'
       : 'rgba(59,130,246,0.1)';
   const border = isLive
     ? 'rgba(16,185,129,0.25)'
+    : isMock
+      ? 'rgba(245,158,11,0.28)'
     : isUnavailable
       ? 'rgba(245,158,11,0.25)'
       : 'rgba(59,130,246,0.25)';
   sourceCard.style.cssText = `background:${bg};border:1px solid ${border};border-radius:var(--radius);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px`;
   sourceCard.innerHTML = `
-    <div style="font-size:12px;font-weight:500;color:${color}">Data Source: ${statusLabel}</div>
+    <div>
+      <div style="font-size:12px;font-weight:500;color:${color}">Data Source: ${statusLabel}</div>
+      ${fallbackReason ? `<div style="font-size:11px;color:var(--text2);margin-top:4px;line-height:1.45;max-width:720px">${fallbackReason}</div>` : ''}
+    </div>
     <div style="font-size:11px;color:var(--text2);font-family:var(--mono)">${sourceLabel}</div>
   `;
   panel.appendChild(sourceCard);

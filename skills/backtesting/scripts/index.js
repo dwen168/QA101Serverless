@@ -28,6 +28,74 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function createSeededRandom(seedText) {
+  let seed = 2166136261;
+  const text = String(seedText || 'quantbot-backtest-mock');
+  for (let index = 0; index < text.length; index += 1) {
+    seed ^= text.charCodeAt(index);
+    seed = Math.imul(seed, 16777619);
+  }
+  return function random() {
+    seed += 0x6D2B79F5;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function generateMockHistoricalData(ticker) {
+  const presets = {
+    AAPL: { base: 185, drift: 0.00045, volatility: 0.014, volume: 62000000 },
+    MSFT: { base: 415, drift: 0.00042, volatility: 0.013, volume: 28000000 },
+    NVDA: { base: 875, drift: 0.0007, volatility: 0.022, volume: 52000000 },
+    TSLA: { base: 248, drift: 0.0002, volatility: 0.028, volume: 96000000 },
+    AMZN: { base: 188, drift: 0.0004, volatility: 0.016, volume: 47000000 },
+    META: { base: 512, drift: 0.0005, volatility: 0.018, volume: 26000000 },
+    GOOGL: { base: 175, drift: 0.00035, volatility: 0.015, volume: 31000000 },
+    CBA: { base: 118, drift: 0.00028, volatility: 0.011, volume: 4200000 },
+    WBC: { base: 31, drift: 0.0002, volatility: 0.012, volume: 7800000 },
+  };
+
+  const symbol = String(ticker || 'MOCK').toUpperCase().replace(/\.AX$/, '');
+  const preset = presets[symbol] || { base: 120, drift: 0.00025, volatility: 0.015, volume: 14000000 };
+  const rand = createSeededRandom(`backtest:${ticker}`);
+  const history = [];
+  const today = new Date();
+  const start = new Date(today);
+  start.setDate(start.getDate() - 3650);
+
+  let close = preset.base * (0.86 + rand() * 0.18);
+  for (let date = new Date(start); date <= today; date.setDate(date.getDate() + 1)) {
+    const day = date.getDay();
+    if (day === 0 || day === 6) continue;
+
+    const seasonalWave = Math.sin(history.length / 42) * 0.0025 + Math.cos(history.length / 19) * 0.0015;
+    const shock = (rand() - 0.5) * preset.volatility;
+    const dailyReturn = preset.drift + seasonalWave + shock;
+    const open = close * (1 + (rand() - 0.5) * preset.volatility * 0.45);
+    close = Math.max(3, close * (1 + dailyReturn));
+    const intradayRange = close * (0.006 + rand() * preset.volatility * 0.9);
+    const high = Math.max(open, close) + intradayRange * (0.35 + rand() * 0.65);
+    const low = Math.min(open, close) - intradayRange * (0.35 + rand() * 0.65);
+    const volume = Math.max(
+      100000,
+      Math.round(preset.volume * (0.7 + rand() * 0.75 + Math.abs(dailyReturn) * 8))
+    );
+
+    history.push({
+      date: new Date(date),
+      open: parseFloat(open.toFixed(2)),
+      high: parseFloat(high.toFixed(2)),
+      low: parseFloat(Math.max(0.5, low).toFixed(2)),
+      close: parseFloat(close.toFixed(2)),
+      volume,
+    });
+  }
+
+  return history;
+}
+
 function getBacktestProfile(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
   const recommendationProfile = getRecommendationProfile(normalized);
@@ -176,6 +244,7 @@ async function fetchHistoricalDataFromYahoo(ticker) {
 // Fetch historical data with fallback: Alpha Vantage -> Yahoo Finance
 async function fetchHistoricalData(ticker, apiKey) {
   let alphaData = null;
+  let alphaError = null;
   try {
     alphaData = await withTimeout(
       fetchHistoricalDataFromAlphaVantage(ticker, apiKey),
@@ -183,15 +252,17 @@ async function fetchHistoricalData(ticker, apiKey) {
       `Alpha Vantage fetch for ${ticker}`
     );
   } catch (error) {
+    alphaError = error;
     console.error('[Backtest] Alpha timeout/fetch error:', error.message);
     alphaData = null;
   }
 
   if (alphaData && alphaData.length >= 50) {
-    return { data: alphaData, source: 'alpha-vantage' };
+    return { data: alphaData, source: 'alpha-vantage', fallbackReason: null };
   }
 
   let yahooData = null;
+  let yahooError = null;
   try {
     yahooData = await withTimeout(
       fetchHistoricalDataFromYahoo(ticker),
@@ -199,17 +270,29 @@ async function fetchHistoricalData(ticker, apiKey) {
       `Yahoo fetch for ${ticker}`
     );
   } catch (error) {
+    yahooError = error;
     console.error('[Backtest] Yahoo timeout/fetch error:', error.message);
     yahooData = null;
   }
 
   if (yahooData && yahooData.length >= 50) {
-    return { data: yahooData, source: 'yahoo-finance' };
+    return { data: yahooData, source: 'yahoo-finance', fallbackReason: alphaData ? 'Alpha Vantage returned too little data; Yahoo Finance used.' : null };
   }
 
+  const mockData = generateMockHistoricalData(ticker);
+  const fallbackParts = [];
+  if (alphaError?.message) fallbackParts.push(`Alpha Vantage failed: ${alphaError.message}`);
+  else if (alphaData && alphaData.length < 50) fallbackParts.push(`Alpha Vantage returned only ${alphaData.length} bars`);
+  else fallbackParts.push('Alpha Vantage unavailable');
+
+  if (yahooError?.message) fallbackParts.push(`Yahoo Finance failed: ${yahooError.message}`);
+  else if (yahooData && yahooData.length < 50) fallbackParts.push(`Yahoo Finance returned only ${yahooData.length} bars`);
+  else fallbackParts.push('Yahoo Finance unavailable');
+
   return {
-    data: alphaData || yahooData || null,
-    source: alphaData ? 'alpha-vantage' : yahooData ? 'yahoo-finance' : 'unavailable',
+    data: mockData,
+    source: 'mock',
+    fallbackReason: `${fallbackParts.join(' · ')}. Using deterministic mock historical data for offline backtesting.`,
   };
 }
 
@@ -715,6 +798,9 @@ async function runBacktest(params, dependencies = {}) {
   const tradingStartOffset = rangeStartIndex - simulationStartIndex;
   const filteredData = simulationData.slice(tradingStartOffset);
   const warnings = [];
+  if (historical.source === 'mock') {
+    warnings.push('Mock historical data is being used because live data sources were unavailable. Backtest results are for demo/offline use only.');
+  }
 
   if (simulationStartIndex === 0 && rangeStartIndex < requiredWarmupBars) {
     warnings.push(`Limited warmup history before ${startDate}; early signals may be less stable for ${strategyName}.`);
@@ -849,8 +935,10 @@ async function runBacktest(params, dependencies = {}) {
           : [],
       },
       dataSource: historical.source,
+      fallbackReason: historical.fallbackReason || null,
     },
     dataSource: historical.source,
+    fallbackReason: historical.fallbackReason || null,
     skillUsed: 'backtesting',
   };
 }
