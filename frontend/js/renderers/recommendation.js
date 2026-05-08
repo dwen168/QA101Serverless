@@ -285,17 +285,43 @@ function renderRecommendation(rec, panel) {
         </div>
         <div style="margin-top:7px;font-size:11px;font-family:var(--mono);font-weight:600;color:${signalDominanceColor}">${signalDominance}</div>
       </div>
-      <div class="signal-grid">
-        ${sortedSignals.map(s => `
-          <div>
-            <div class="signal-row">
-              <span class="signal-pts ${s.points > 0 ? 'pos' : 'neg'}">${s.points > 0 ? '+' : ''}${s.points}</span>
-              <span class="signal-name">${s.name}</span>
-              <span class="signal-reason">${s.reason}</span>
-            </div>
-            ${s.detail && s.detail.length ? `<div class="signal-detail">${s.detail.map(d => `<span class="detail-chip"><span>${d.label}:</span>${d.value}</span>`).join('')}</div>` : ''}
-          </div>
-        `).join('')}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <!-- Positive Signals Column -->
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:10px;font-family:var(--mono);color:var(--green);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;padding-left:4px">Bullish Factors</div>
+          ${sortedSignals.filter(s => Number(s.points || 0) > 0).length > 0
+            ? sortedSignals.filter(s => Number(s.points || 0) > 0).map(s => `
+              <div style="background:rgba(16,185,129,0.03);border:1px solid rgba(16,185,129,0.12);border-radius:10px;padding:8px">
+                <div class="signal-row">
+                  <span class="signal-pts pos">+${s.points}</span>
+                  <span class="signal-name">${s.name}</span>
+                  <span class="signal-reason">${s.reason}</span>
+                </div>
+                ${s.detail && s.detail.length ? `<div class="signal-detail">${s.detail.map(d => `<span class="detail-chip"><span>${d.label}:</span>${d.value}</span>`).join('')}</div>` : ''}
+              </div>
+            `).join('')
+            : `<div style="font-size:11px;color:var(--text3);padding:10px;border:1px dashed var(--border);border-radius:10px;text-align:center">No positive signals.</div>`
+          }
+        </div>
+
+        <!-- Negative Signals Column -->
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:10px;font-family:var(--mono);color:var(--red);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;padding-left:4px">Bearish Factors</div>
+          ${sortedSignals.filter(s => Number(s.points || 0) < 0).length > 0
+            ? sortedSignals.filter(s => Number(s.points || 0) < 0).map(s => `
+              <div style="background:rgba(239,68,68,0.03);border:1px solid rgba(239,68,68,0.12);border-radius:10px;padding:8px">
+                <div class="signal-row">
+                  <span class="signal-pts neg">${s.points}</span>
+                  <span class="signal-name">${s.name}</span>
+                  <span class="signal-reason">${s.reason}</span>
+                </div>
+                ${s.detail && s.detail.length ? `<div class="signal-detail">${s.detail.map(d => `<span class="detail-chip"><span>${d.label}:</span>${d.value}</span>`).join('')}</div>` : ''}
+              </div>
+            `).join('')
+            : `<div style="font-size:11px;color:var(--text3);padding:10px;border:1px dashed var(--border);border-radius:10px;text-align:center">No negative signals.</div>`
+          }
+        </div>
       </div>
     </div>
 

@@ -645,6 +645,12 @@
     background: rgba(39,39,42,0.7);
   }
   .chat-input::placeholder { color: var(--text3); }
+  .chat-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: rgba(22,34,53,0.5);
+    border-color: var(--border);
+  }
   .send-btn {
     background: var(--cyan); border: none; border-radius: var(--radius-sm);
     width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center;
@@ -687,6 +693,12 @@
     background: var(--cyan-dim);
     box-shadow: 0 0 12px rgba(59,130,246,0.15);
     transform: translateY(-2px);
+  }
+  .quick-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
   }
 
   /* ── Analysis panel ── */

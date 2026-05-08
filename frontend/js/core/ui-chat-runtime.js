@@ -74,9 +74,22 @@ function isAbortError(error) {
   return error?.name === 'AbortError' || String(error?.message || '').toLowerCase().includes('aborted');
 }
 
-function updateStopButtonState() {
+function updateChatUiState() {
   const stopBtn = document.getElementById('stop-btn');
+  const sendBtn = document.getElementById('send-btn');
+  const chatInput = document.getElementById('chat-input');
+  const quickBtnsContainer = document.getElementById('quick-btns');
+
   if (stopBtn) stopBtn.disabled = !isProcessingRequest;
+  if (sendBtn) sendBtn.disabled = isProcessingRequest;
+  if (chatInput) chatInput.disabled = isProcessingRequest;
+
+  if (quickBtnsContainer) {
+    const btns = quickBtnsContainer.querySelectorAll('button');
+    btns.forEach((btn) => {
+      btn.disabled = isProcessingRequest;
+    });
+  }
 }
 
 function beginRequestSession() {
@@ -85,13 +98,13 @@ function beginRequestSession() {
   }
   currentRequestController = new AbortController();
   isProcessingRequest = true;
-  updateStopButtonState();
+  updateChatUiState();
 }
 
 function endRequestSession() {
   isProcessingRequest = false;
   currentRequestController = null;
-  updateStopButtonState();
+  updateChatUiState();
 }
 
 function cancelCurrentRequest() {
@@ -141,3 +154,4 @@ window.formatDurationMs = formatDurationMs;
 window.apiFetch = apiFetch;
 window.readApiJson = readApiJson;
 window.isAbortError = isAbortError;
+window.getProcessingStatus = () => isProcessingRequest;

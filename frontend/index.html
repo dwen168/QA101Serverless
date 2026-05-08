@@ -179,7 +179,7 @@
       </div>
       <div class="chat-input-row">
         <textarea class="chat-input" id="chat-input" rows="2" placeholder="Analyze a stock, optimize a portfolio, or run a backtest..."></textarea>
-        <button class="send-btn" onclick="sendMessage()">
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">
           <svg viewBox="0 0 16 16"><path d="M1 8L15 1 8 15 7 9z"/></svg>
         </button>
         <button class="send-btn stop-btn" id="stop-btn" onclick="cancelCurrentRequest()" disabled title="Stop current request">

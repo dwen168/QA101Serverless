@@ -51,16 +51,32 @@ const MACRO_RECENT_MIN_ITEMS = 4;
 const MACRO_GOOGLE_QUERY = 'fed OR rba OR rate decision OR geopolitics OR war OR sanctions OR oil markets';
 
 const SECTOR_PROXY_UNIVERSE = [
-  { name: 'Technology', etf: 'XLK', aliases: ['technology', 'software', 'internet'] },
+  // Technology — Yahoo ASX variants: 'Technology', 'Information Technology'
+  { name: 'Technology', etf: 'XLK', aliases: ['technology', 'software', 'internet', 'information technology'] },
+  // Semiconductors
   { name: 'Semiconductors', etf: 'SOXX', aliases: ['semiconductor', 'chip'] },
-  { name: 'Financials', etf: 'XLF', aliases: ['financial', 'bank', 'insurance'] },
-  { name: 'Healthcare', etf: 'XLV', aliases: ['healthcare', 'health care', 'biotech', 'pharma'] },
+  // Financials — Yahoo ASX variant: 'Financial Services'
+  { name: 'Financials', etf: 'XLF', aliases: ['financial', 'bank', 'insurance', 'financial services', 'banks'] },
+  // Healthcare
+  { name: 'Healthcare', etf: 'XLV', aliases: ['healthcare', 'health care', 'biotech', 'pharma', 'medical'] },
+  // Energy
   { name: 'Energy', etf: 'XLE', aliases: ['energy', 'oil', 'gas'] },
-  { name: 'Materials', etf: 'XLB', aliases: ['materials', 'material', 'chemicals', 'metals'] },
-  { name: 'Mining', etf: 'XME', aliases: ['mining', 'miner', 'metal mining'] },
-  { name: 'Industrials', etf: 'XLI', aliases: ['industrial', 'manufacturing'] },
-  { name: 'Consumer Discretionary', etf: 'XLY', aliases: ['consumer discretionary', 'retail', 'automotive', 'e-commerce'] },
-  { name: 'Communication Services', etf: 'XLC', aliases: ['communication', 'media', 'telecom', 'social media'] },
+  // Materials — Yahoo ASX variant: 'Basic Materials'
+  { name: 'Materials', etf: 'XLB', aliases: ['materials', 'material', 'chemicals', 'metals', 'basic materials', 'resources'] },
+  // Mining — subset of Materials for ASX-specific mining plays
+  { name: 'Mining', etf: 'XME', aliases: ['mining', 'miner', 'metal mining', 'gold', 'lithium', 'iron ore'] },
+  // Industrials — Yahoo ASX variants: 'Industrials', 'Industrial'
+  { name: 'Industrials', etf: 'XLI', aliases: ['industrial', 'manufacturing', 'aerospace', 'defence', 'defense', 'transportation'] },
+  // Consumer Discretionary — Yahoo ASX variant: 'Consumer Cyclical'
+  { name: 'Consumer Discretionary', etf: 'XLY', aliases: ['consumer discretionary', 'consumer cyclical', 'retail', 'automotive', 'e-commerce'] },
+  // Communication Services — Yahoo ASX variant: 'Communication Services', 'Telecom'
+  { name: 'Communication Services', etf: 'XLC', aliases: ['communication', 'media', 'telecom', 'social media', 'communication services'] },
+  // Real Estate — present in ASX (GMG, SCG, GPT, etc.) but was missing from proxy universe
+  { name: 'Real Estate', etf: 'XLRE', aliases: ['real estate', 'reit', 'property', 'a-reit', 'listed property'] },
+  // Utilities — present in ASX (APA, AST, etc.) but was missing from proxy universe
+  { name: 'Utilities', etf: 'XLU', aliases: ['utilities', 'utility', 'electricity', 'water', 'gas utility'] },
+  // Consumer Staples — Yahoo ASX variant: 'Consumer Defensive'
+  { name: 'Consumer Staples', etf: 'XLP', aliases: ['consumer staples', 'consumer defensive', 'food', 'beverage', 'household', 'grocery'] },
 ];
 
 const DEFAULT_SECTOR_NAMES = [
@@ -72,7 +88,38 @@ const DEFAULT_SECTOR_NAMES = [
   'Mining',
   'Industrials',
   'Consumer Discretionary',
+  'Real Estate',
+  'Utilities',
+  'Consumer Staples',
 ];
+
+/**
+ * Normalise a raw Yahoo Finance (or Finnhub) sector / industry string to the
+ * canonical internal name used throughout the pipeline (peer lookups, ETF
+ * proxy selection, macro overlay matching in scoring.js, etc.).
+ *
+ * Yahoo Finance returns different strings for the same sector depending on the
+ * market — e.g. ASX stocks get 'Basic Materials' while US stocks get 'Materials'.
+ * This function bridges that gap so every downstream consumer sees a consistent
+ * canonical name.
+ *
+ * @param {string} rawSector  The sector string returned by the data provider.
+ * @returns {string}          Canonical internal sector name, or 'Unknown'.
+ */
+function normalizeSector(rawSector) {
+  if (!rawSector || typeof rawSector !== 'string') return 'Unknown';
+  const lower = rawSector.trim().toLowerCase();
+  if (!lower || lower === 'unknown') return 'Unknown';
+
+  // Walk the proxy universe and match by exact canonical name or alias substring.
+  const match = SECTOR_PROXY_UNIVERSE.find(
+    (entry) =>
+      entry.name.toLowerCase() === lower ||
+      entry.aliases.some((alias) => lower.includes(alias))
+  );
+
+  return match ? match.name : rawSector.trim();
+}
 
 const ASX_PEER_FALLBACK_BY_SECTOR = {
   technology: ['XRO.AX', 'WTC.AX', 'TNE.AX', 'NXT.AX', 'ALU.AX', 'CPU.AX'],
@@ -86,6 +133,7 @@ const ASX_PEER_FALLBACK_BY_SECTOR = {
   'communication services': ['TLS.AX', 'REA.AX', 'CAR.AX', 'SEK.AX', 'NWS.AX', 'APE.AX'],
   utilities: ['AST.AX', 'APA.AX', 'MEZ.AX', 'IFL.AX', 'MCY.AX', 'SKI.AX'],
   'real estate': ['GMG.AX', 'SCG.AX', 'CHC.AX', 'VCX.AX', 'GPT.AX', 'MGR.AX'],
+  'consumer staples': ['WOW.AX', 'COL.AX', 'EDV.AX', 'TWE.AX', 'MTS.AX', 'RIC.AX'],
 };
 
 const ASX_PEER_FALLBACK_DEFAULT = ['BHP.AX', 'CBA.AX', 'CSL.AX', 'WBC.AX', 'WDS.AX', 'RIO.AX'];
@@ -974,7 +1022,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const targetHigh = safeNumber(fd.targetHighPrice) || (price * 1.12);
   const targetLow = safeNumber(fd.targetLowPrice) || (price * 0.9);
   const effectiveTargetMean = targetMean || (targetHigh + targetLow) / 2;
-  const sectorLabel = sp.sector || sp.industry || 'Unknown';
+  const sectorLabel = normalizeSector(sp.sector || sp.industry || 'Unknown');
   let peerSymbols = [];
   if (config.finnhubApiKey) {
     try {
@@ -1002,7 +1050,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
     ticker,
     name: priceMod.longName || priceMod.shortName || `${ticker}`,
     description: (sp.longBusinessSummary || '').substring(0, 500) || null,
-    sector: sp.sector || sp.industry || 'Unknown',
+    sector: normalizeSector(sp.sector || sp.industry || 'Unknown'),
     industry: sp.industry || null,
     currency: priceMod.currency || 'USD',
     exchange: priceMod.exchangeName || '',

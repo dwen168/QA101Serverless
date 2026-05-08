@@ -8,6 +8,7 @@ function resetPills() {
 }
 
 async function sendMessage() {
+  if (getProcessingStatus()) return;
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
@@ -18,6 +19,7 @@ async function sendMessage() {
 }
 
 async function quickAnalyze(ticker) {
+  if (getProcessingStatus()) return;
   const text = `Analyze ${ticker}`;
   addMessage('user', text);
   chatHistory.push({ role: 'user', content: text });
@@ -25,6 +27,7 @@ async function quickAnalyze(ticker) {
 }
 
 async function quickPortfolio(tickers) {
+  if (getProcessingStatus()) return;
   const text = `Optimize portfolio ${tickers.join(', ')}`;
   addMessage('user', text);
   chatHistory.push({ role: 'user', content: text });
@@ -32,6 +35,7 @@ async function quickPortfolio(tickers) {
 }
 
 async function quickBacktest(ticker) {
+  if (getProcessingStatus()) return;
   const text = `Backtest ${ticker} from 2025-01-01 to 2026-03-18`;
   addMessage('user', text);
   chatHistory.push({ role: 'user', content: text });

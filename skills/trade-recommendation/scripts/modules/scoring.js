@@ -61,18 +61,98 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     ], 'longTrend');
   }
 
+  // ── Trend-context helpers for RSI adaptive thresholds (improvement 3 & 4) ──
+  // Detect whether there is a confirmed strong uptrend or downtrend using:
+  //   • MA alignment: price > MA50 > MA200  → uptrend; price < MA50 < MA200 → downtrend
+  //   • MACD confirmation (if available)
+  const macdBullish = marketData.technicalIndicators?.macd?.signal === 'BULLISH';
+  const macdBearish = marketData.technicalIndicators?.macd?.signal === 'BEARISH';
+  const aboveMa50 = ma50 != null && p > ma50;
+  const aboveMa200 = ma200 != null && p > ma200;
+  const ma50AboveMa200 = ma50 != null && ma200 != null && ma50 > ma200;
+
+  // Strong uptrend: price above both MAs *and* MAs aligned *and* MACD bullish
+  const strongUptrend = aboveMa50 && aboveMa200 && ma50AboveMa200 && macdBullish;
+  // Strong downtrend: price below both MAs *and* MAs aligned downward *and* MACD bearish
+  const strongDowntrend = !aboveMa50 && !aboveMa200 && !ma50AboveMa200 && macdBearish;
+  // Moderate uptrend: price above MA50 and MA50 > MA200 (but MACD may be neutral)
+  const moderateUptrend = aboveMa50 && ma50AboveMa200;
+  // Moderate downtrend: price below MA50 and MA50 < MA200
+  const moderateDowntrend = !aboveMa50 && !ma50AboveMa200;
+
+  // Dynamic RSI thresholds (improvement 4):
+  //   In a strong uptrend RSI can "run hot" — raise the overbought bar to 80 to avoid
+  //   false sell signals; in a strong downtrend lower the oversold bar to 25 because
+  //   oversold readings in downtrends tend to keep falling.
+  const rsiOverboughtThreshold = strongUptrend ? 80 : 70;
+  const rsiOversoldThreshold   = strongDowntrend ? 25 : 30;
+
   // RSI signals
   const rsi = marketData.rsi;
-  if (rsi > 70) {
-    add('RSI Overbought', w('rsi_overbought'), `RSI > 70 — overextended`, [
-      { label: 'RSI', value: fmt(rsi, 1) },
-      { label: 'Zone', value: 'Overbought (>70)' },
-    ], 'oscillator');
-  } else if (rsi < 30) {
-    add('RSI Oversold', w('rsi_oversold'), `RSI < 30 — contrarian buy signal`, [
-      { label: 'RSI', value: fmt(rsi, 1) },
-      { label: 'Zone', value: 'Oversold (<30)' },
-    ], 'oscillator');
+  if (rsi > rsiOverboughtThreshold) {
+    // Improvement 3: in a strong confirmed uptrend the overbought signal is weaker
+    // (momentum can stay elevated), so we apply a 50 % dampening factor.
+    const rawPoints = w('rsi_overbought');
+    const dampened  = strongUptrend ? rawPoints * 0.5 : rawPoints;
+    const trendNote = strongUptrend ? ' (dampened — strong uptrend in place)' : '';
+    add(
+      `RSI Overbought${strongUptrend ? ' (Trend-Adjusted)' : ''}`,
+      dampened,
+      `RSI > ${rsiOverboughtThreshold} — overextended${trendNote}`,
+      [
+        { label: 'RSI', value: fmt(rsi, 1) },
+        { label: 'Threshold', value: `${rsiOverboughtThreshold}` },
+        { label: 'Zone', value: `Overbought (>${rsiOverboughtThreshold})` },
+        { label: 'Trend', value: strongUptrend ? 'Strong Up — dampened' : 'Neutral/Down' },
+      ],
+      'oscillator'
+    );
+  } else if (rsi < rsiOversoldThreshold) {
+    // Improvement 3: in a strong downtrend an oversold RSI is NOT a contrarian buy —
+    // it more often signals continuation. Suppress the bullish points in that context.
+    if (strongDowntrend) {
+      add(
+        'RSI Oversold (Downtrend — Caution)',
+        0,  // no bullish points; the add() guard drops 0-point signals, so log a neutral note
+        // Use a tiny negative instead so the signal still appears with a warning label
+        -0.5,
+        `RSI < ${rsiOversoldThreshold} but price is in a confirmed downtrend — oversold can persist`,
+        [
+          { label: 'RSI', value: fmt(rsi, 1) },
+          { label: 'Threshold', value: `${rsiOversoldThreshold}` },
+          { label: 'Warning', value: 'Downtrend intact — avoid catching falling knife' },
+        ],
+        'oscillator'
+      );
+    } else if (moderateDowntrend) {
+      // Moderate downtrend: halve the contrarian signal
+      add(
+        'RSI Oversold (Weak Trend)',
+        w('rsi_oversold') * 0.5,
+        `RSI < ${rsiOversoldThreshold} — partial contrarian signal (moderate downtrend present)`,
+        [
+          { label: 'RSI', value: fmt(rsi, 1) },
+          { label: 'Threshold', value: `${rsiOversoldThreshold}` },
+          { label: 'Zone', value: `Oversold (<${rsiOversoldThreshold})` },
+          { label: 'Trend', value: 'Moderate Down — halved weight' },
+        ],
+        'oscillator'
+      );
+    } else {
+      // Neutral or uptrend context — full contrarian buy signal
+      add(
+        'RSI Oversold',
+        w('rsi_oversold'),
+        `RSI < ${rsiOversoldThreshold} — contrarian buy signal in neutral/uptrend context`,
+        [
+          { label: 'RSI', value: fmt(rsi, 1) },
+          { label: 'Threshold', value: `${rsiOversoldThreshold}` },
+          { label: 'Zone', value: `Oversold (<${rsiOversoldThreshold})` },
+          { label: 'Trend', value: 'Neutral/Up — full weight' },
+        ],
+        'oscillator'
+      );
+    }
   } else if (rsi >= 45 && rsi <= 65) {
     add('RSI Healthy', w('rsi_healthy'), `RSI in bullish healthy zone (45–65)`, [
       { label: 'RSI', value: fmt(rsi, 1) },

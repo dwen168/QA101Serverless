@@ -28,6 +28,19 @@ function generateMockMarketData(ticker) {
     GOOGL: { base: 175.2, name: 'Alphabet Inc.', sector: 'Technology' },
     META: { base: 512.6, name: 'Meta Platforms', sector: 'Social Media' },
     BRK: { base: 380.5, name: 'Berkshire Hathaway', sector: 'Financials' },
+    // ASX Top Stocks
+    'BHP.AX': { base: 45.2, name: 'BHP Group Limited', sector: 'Mining' },
+    'CBA.AX': { base: 115.8, name: 'Commonwealth Bank of Australia', sector: 'Financials' },
+    'CSL.AX': { base: 285.4, name: 'CSL Limited', sector: 'Healthcare' },
+    'WBC.AX': { base: 26.5, name: 'Westpac Banking Corporation', sector: 'Financials' },
+    'NAB.AX': { base: 34.2, name: 'National Australia Bank Limited', sector: 'Financials' },
+    'ANZ.AX': { base: 28.8, name: 'ANZ Group Holdings Limited', sector: 'Financials' },
+    'MQG.AX': { base: 188.5, name: 'Macquarie Group Limited', sector: 'Financials' },
+    'WES.AX': { base: 65.2, name: 'Wesfarmers Limited', sector: 'Consumer Discretionary' },
+    'RIO.AX': { base: 125.4, name: 'Rio Tinto Limited', sector: 'Mining' },
+    'WOW.AX': { base: 32.8, name: 'Woolworths Group Limited', sector: 'Consumer Staples' },
+    'TLS.AX': { base: 3.8, name: 'Telstra Group Limited', sector: 'Communication Services' },
+    'WDS.AX': { base: 29.5, name: 'Woodside Energy Group Ltd', sector: 'Energy' },
   };
 
   const stockInfo = stocks[ticker] || {
