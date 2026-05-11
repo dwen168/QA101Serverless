@@ -2,7 +2,6 @@ const { callDeepSeek } = require('../../../backend/lib/llm');
 const { loadSkills } = require('../../../backend/lib/skill-loader');
 const { parseJsonResponse, requireObject } = require('../../../backend/lib/utils');
 const { getWeightsMetadata } = require('../../../backend/lib/weights-loader');
-const { calculateATR, calculateVaR } = require('../../../backend/lib/technical-indicators');
 
 const { normalizeTimeHorizon, getRecommendationProfile, mapActionFromScore, buildObjectiveLensSummary } = require('./modules/profiles');
 const { computeConfidence, generateConfidenceExplanation } = require('./modules/confidence');
@@ -10,6 +9,7 @@ const { findHistoricalPatterns } = require('./modules/historical');
 const { scoreSignals, scoreBacktestSnapshot } = require('./modules/scoring');
 const { buildDecisionTree } = require('./modules/decision-tree');
 const { runRecommendationBacktest } = require('./backtest');
+const { computeRiskMetrics } = require('./modules/risk');
 
 const skills = loadSkills();
 
@@ -55,48 +55,65 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
   const confidence = confidenceResult.confidence;
   const confidenceBreakdown = confidenceResult.breakdown;
 
-  const entry = marketData.price;
-
-  // Risk metrics - using 14-day ATR and VaR
-  let atr = null;
-  let varMetrics = null;
-  let stopLoss = entry * 0.95;  // Default 5% fallback
-  let takeProfit = entry * 1.10; // Default 10% fallback
-
-  if (marketData.priceHistory && marketData.priceHistory.length >= 15) {
-    // Use 14-day ATR instead of 52-week range-based ATR
-    atr = calculateATR(marketData.priceHistory, 14);
-    if (atr && atr > 0) {
-      stopLoss = parseFloat((entry - atr * profile.atrStopMultiplier).toFixed(2));
-      takeProfit = parseFloat((entry + atr * profile.atrTargetMultiplier).toFixed(2));
-    }
-
-    // Calculate Value at Risk (95% confidence)
-    varMetrics = calculateVaR(marketData.priceHistory, 0.95);
-  }
-
-  const riskReward = stopLoss > 0 ? parseFloat(((takeProfit - entry) / (entry - stopLoss)).toFixed(1)) : 0;
+  // Risk metrics from dedicated module
+  const riskMetricsData = computeRiskMetrics(marketData, profile);
+  const { entry, stopLoss, takeProfit, riskReward, atr, varMetrics } = riskMetricsData;
 
   const llm = dependencies.callDeepSeek || callDeepSeek;
-  const systemPrompt = `You are a senior quantitative analyst running the trade-recommendation skill.\n\n${skills['trade-recommendation']}\n\nSynthesize all signals and write a clear trade recommendation.`;
-  const userMessage = `Write a trade recommendation for ${marketData.ticker}. Investment objective: ${profile.label} (${profile.holdingPeriod}). Recommendation focus: ${profile.focus} Action: ${action}. Score: ${score}. Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}. Return JSON with: rationale (2-3 sentences), timeHorizon (${normalizedTimeHorizon} only), keyRisks (array of 2-3 strings), executiveSummary (1 sentence plain English). The rationale must fit the supplied investment objective and should not switch to a different horizon. Additional EDA context: ${JSON.stringify(edaInsights || {}, null, 2)}. Macro context: ${JSON.stringify(marketData.macroContext || {}, null, 2)}. Policy overlay: ${JSON.stringify(policyOverlay || {}, null, 2)}. Event regime overlay: ${JSON.stringify(eventRegimeOverlay || {}, null, 2)}. Fundamental context: ${JSON.stringify({ pe: marketData.pe, eps: marketData.eps, marketCap: marketData.marketCap, analystConsensus: marketData.analystConsensus }, null, 2)}`;
+  const systemPrompt = `You are a senior quantitative analyst. Synthesize signals and write a trade recommendation.
 
-  let llmRecommendation;
-  try {
-    const analysis = await llm(systemPrompt, userMessage);
-    llmRecommendation = parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile));
-  } catch {
-    llmRecommendation = buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
-  }
+Your task:
+1. Write a 'rationale' (2-3 sentences) explaining the recommendation based on investment objective and signals.
+2. Ensure 'timeHorizon' matches the requested horizon.
+3. List 2-3 specific 'keyRisks'.
+4. Write a 1-sentence plain English 'executiveSummary'.
+
+Return JSON ONLY. Format:
+{
+  "rationale": "...",
+  "timeHorizon": "...",
+  "keyRisks": ["...", "..."],
+  "executiveSummary": "..."
+}`;
+  const userMessage = `Write a trade recommendation for ${marketData.ticker}.
+Investment objective: ${profile.label} (${profile.holdingPeriod}).
+Focus: ${profile.focus}.
+Action: ${action}.
+Score: ${score}.
+Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}.
+
+Context:
+- EDA Factors: ${JSON.stringify(edaInsights?.edaFactors || marketData?.technicalIndicators?.edaFactors || {}, null, 2)}
+- EDA Insights (LLM): ${JSON.stringify(edaInsights?.insights || [], null, 2)}
+- Macro Context: ${JSON.stringify(marketData.macroContext || {}, null, 2)}
+- Policy Overlay: ${JSON.stringify(policyOverlay || {}, null, 2)}
+- Event Regime Overlay: ${JSON.stringify(eventRegimeOverlay || {}, null, 2)}
+- Fundamental Context: ${JSON.stringify({ pe: marketData.pe, eps: marketData.eps, marketCap: marketData.marketCap, analystConsensus: marketData.analystConsensus }, null, 2)}`;
+
+  // Run LLM calls in parallel
+  const [llmRecommendationResult, confidenceExplanation] = await Promise.all([
+    (async () => {
+      try {
+        const analysis = await llm(systemPrompt, userMessage);
+        return parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile));
+      } catch (error) {
+        console.warn(`[Trade Recommendation] Failed to generate rationale for ${marketData.ticker}:`, error.message);
+        return buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
+      }
+    })(),
+
+    generateConfidenceExplanation({
+      llm,
+      ticker: marketData.ticker,
+      action,
+      confidence,
+      confidenceBreakdown,
+      signals,
+    }),
+  ]);
+
+  const llmRecommendation = llmRecommendationResult;
   llmRecommendation.timeHorizon = normalizedTimeHorizon;
-  const confidenceExplanation = await generateConfidenceExplanation({
-    llm,
-    ticker: marketData.ticker,
-    action,
-    confidence,
-    confidenceBreakdown,
-    signals,
-  });
 
   // Historical pattern matching
   const historicalPatterns = findHistoricalPatterns(marketData.priceHistory, marketData);

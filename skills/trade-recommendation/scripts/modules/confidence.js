@@ -1,9 +1,27 @@
+const CONFIDENCE_CONFIG = {
+  BASE_SCORE: 42,
+  TANH_MULTIPLIER: 34,
+  TANH_SCALAR: 1.8,
+  CONSISTENCY_SCALAR: 14,
+  CONFLICT_PENALTY_THRESHOLD: 0.3,
+  CONFLICT_PENALTY_MIN_MAGNITUDE: 5,
+  CONFLICT_PENALTY_VALUE: -6,
+  LOW_SIGNAL_COUNT_THRESHOLD: 3,
+  LOW_SIGNAL_PENALTY: -4,
+  HIGH_SIGNAL_COUNT_THRESHOLD: 10,
+  HIGH_SIGNAL_BOOST: 2,
+  MACRO_HIGH_RISK_PENALTY: -8,
+  MACRO_LOW_RISK_BOOST: 3,
+  MIN_CONFIDENCE: 30,
+  MAX_CONFIDENCE: 92
+};
+
 function computeConfidence(score, signals = [], macroRisk = 'MEDIUM') {
   const absScore = Math.abs(Number(score) || 0);
   const normalizedScore = Math.min(1, absScore / 10);
 
   // Saturate slowly so mid scores do not jump to very high confidence.
-  const baseConfidence = 42 + Math.round(34 * Math.tanh(normalizedScore * 1.8));
+  const baseConfidence = CONFIDENCE_CONFIG.BASE_SCORE + Math.round(CONFIDENCE_CONFIG.TANH_MULTIPLIER * Math.tanh(normalizedScore * CONFIDENCE_CONFIG.TANH_SCALAR));
 
   const magnitudes = signals.map((signal) => Number(signal?.points) || 0);
   const positive = magnitudes.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
@@ -12,32 +30,32 @@ function computeConfidence(score, signals = [], macroRisk = 'MEDIUM') {
   const alignment = totalMagnitude > 0 ? Math.abs(positive - negative) / totalMagnitude : 0;
 
   // Strong one-sided evidence gets a boost; mixed evidence gets penalized.
-  const consistencyAdjustment = Math.round((alignment - 0.5) * 14);
-  const conflictPenalty = alignment < 0.3 && totalMagnitude >= 5 ? -6 : 0;
+  const consistencyAdjustment = Math.round((alignment - 0.5) * CONFIDENCE_CONFIG.CONSISTENCY_SCALAR);
+  const conflictPenalty = alignment < CONFIDENCE_CONFIG.CONFLICT_PENALTY_THRESHOLD && totalMagnitude >= CONFIDENCE_CONFIG.CONFLICT_PENALTY_MIN_MAGNITUDE ? CONFIDENCE_CONFIG.CONFLICT_PENALTY_VALUE : 0;
 
   let confidence = baseConfidence + consistencyAdjustment + conflictPenalty;
   let signalCountAdjustment = 0;
 
-  if (signals.length <= 3) {
-    confidence -= 4;
-    signalCountAdjustment = -4;
+  if (signals.length <= CONFIDENCE_CONFIG.LOW_SIGNAL_COUNT_THRESHOLD) {
+    confidence += CONFIDENCE_CONFIG.LOW_SIGNAL_PENALTY;
+    signalCountAdjustment = CONFIDENCE_CONFIG.LOW_SIGNAL_PENALTY;
   }
-  if (signals.length >= 10) {
-    confidence += 2;
-    signalCountAdjustment = 2;
+  if (signals.length >= CONFIDENCE_CONFIG.HIGH_SIGNAL_COUNT_THRESHOLD) {
+    confidence += CONFIDENCE_CONFIG.HIGH_SIGNAL_BOOST;
+    signalCountAdjustment = CONFIDENCE_CONFIG.HIGH_SIGNAL_BOOST;
   }
 
   let macroAdjustment = 0;
 
   if (macroRisk === 'HIGH') {
-    confidence -= 8;
-    macroAdjustment = -8;
+    confidence += CONFIDENCE_CONFIG.MACRO_HIGH_RISK_PENALTY;
+    macroAdjustment = CONFIDENCE_CONFIG.MACRO_HIGH_RISK_PENALTY;
   } else if (macroRisk === 'LOW') {
-    confidence += 3;
-    macroAdjustment = 3;
+    confidence += CONFIDENCE_CONFIG.MACRO_LOW_RISK_BOOST;
+    macroAdjustment = CONFIDENCE_CONFIG.MACRO_LOW_RISK_BOOST;
   }
 
-  const bounded = Math.max(30, Math.min(92, Math.round(confidence)));
+  const bounded = Math.max(CONFIDENCE_CONFIG.MIN_CONFIDENCE, Math.min(CONFIDENCE_CONFIG.MAX_CONFIDENCE, Math.round(confidence)));
   return {
     confidence: bounded,
     breakdown: {
@@ -70,12 +88,13 @@ function buildFallbackConfidenceExplanation({ action, confidence, confidenceBrea
 async function generateConfidenceExplanation({ llm, ticker, action, confidence, confidenceBreakdown, signals }) {
   const fallback = buildFallbackConfidenceExplanation({ action, confidence, confidenceBreakdown });
   try {
-    const systemPrompt = 'You are a quantitative analyst. Write one concise sentence (max 24 words) explaining confidence. No markdown.';
+    const systemPrompt = 'You are a quantitative analyst. Write a single concise sentence (under 100 characters) explaining confidence. No markdown.';
     const userMessage = `Ticker=${ticker}; Action=${action}; Confidence=${confidence}; Alignment=${confidenceBreakdown?.alignment}; Positive=${confidenceBreakdown?.positiveMagnitude}; Negative=${confidenceBreakdown?.negativeMagnitude}; MacroAdj=${confidenceBreakdown?.macroAdjustment}; Conflict=${confidenceBreakdown?.conflictPenalty}; SignalCount=${signals.length}.`;
     const text = await llm(systemPrompt, userMessage);
     const cleaned = String(text || '').replace(/\\s+/g, ' ').replace(/\`\`\`/g, '').trim();
     return cleaned || fallback;
-  } catch {
+  } catch (error) {
+    console.warn(`[Trade Recommendation] Failed to generate confidence explanation for ${ticker}:`, error.message);
     return fallback;
   }
 }
@@ -83,5 +102,6 @@ async function generateConfidenceExplanation({ llm, ticker, action, confidence, 
 module.exports = {
   computeConfidence,
   buildFallbackConfidenceExplanation,
-  generateConfidenceExplanation
+  generateConfidenceExplanation,
+  CONFIDENCE_CONFIG
 };

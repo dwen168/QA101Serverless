@@ -129,79 +129,88 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     return;
   }
 
-  // ── SKILL 2 ──
+  // ── SKILLS 2 & 3 (Parallel) ──
   setPillState(2, 'active');
-  const l2 = addLoadingMsg('⟳ Running eda-visual-analysis skill...');
-
-  let charts, edaInsights;
-  try {
-    const skillStartedAt = performance.now();
-    const r2 = await apiFetch(`${API_BASE}/skills/eda-visual-analysis`, {
-      method: 'POST', headers: getLlmHeaders(),
-      body: JSON.stringify({ marketData }),
-    });
-    const d2 = await readApiJson(r2);
-    charts = d2.charts;
-    edaInsights = d2.edaInsights;
-    setPillState(2, 'done');
-    removeLoadingMsg();
-    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's2', label: '② eda-visual-analysis' });
-    renderEDA(charts, edaInsights, marketData, panel);
-  } catch (err) {
-    if (isAbortError(err)) return;
-    setPillState(2, '');
-    removeLoadingMsg();
-    addMessage('bot', String(err?.message || 'EDA analysis failed.'));
-  }
-
-  // ── SKILL 3 ──
   setPillState(3, 'active');
-  const l3 = addLoadingMsg('⟳ Running trade-recommendation skill...');
+  const l23 = addLoadingMsg('⟳ Running visual EDA and recommendation engines...');
 
-  try {
+  let charts, edaInsights, rec;
+
+  const skill2Promise = (async () => {
     const skillStartedAt = performance.now();
-    const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
-      method: 'POST', headers: getLlmHeaders(),
-      body: JSON.stringify({ marketData, edaInsights, timeHorizon }),
-    });
-    const d3 = await readApiJson(r3);
-    setPillState(3, 'done');
-    removeLoadingMsg();
-    const rec = d3.recommendation;
-    // Fetch backtest-style (price+technical) decision for the latest bar
     try {
-      const rbt = await apiFetch(`${API_BASE}/skills/trade-recommendation/backtest-action`, {
-        method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ priceHistory: marketData.priceHistory, timeHorizon }),
+      const r2 = await apiFetch(`${API_BASE}/skills/eda-visual-analysis`, {
+        method: 'POST', headers: getLlmHeaders(),
+        body: JSON.stringify({ marketData }),
       });
-      const dbt = await readApiJson(rbt);
-      if (rbt.ok && !dbt.error) {
-        rec.backtestView = dbt; // { score, action }
-      }
-    } catch (e) {
-      // ignore backtest-view failures
+      const d2 = await readApiJson(r2);
+      charts = d2.charts;
+      edaInsights = d2.edaInsights;
+      setPillState(2, 'done');
+      addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's2', label: '② eda-visual-analysis' });
+      renderEDA(charts, edaInsights, marketData, panel);
+      return d2;
+    } catch (err) {
+      if (isAbortError(err)) return null;
+      setPillState(2, '');
+      addMessage('bot', String(err?.message || 'EDA analysis failed.'));
+      return null;
     }
-    addMessage('bot', `✓ ${rec.action} — ${rec.confidence}% confidence (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's3', label: '③ trade-recommendation' });
-    renderRecommendation(rec, panel);
-    // Save a structured snapshot so the UI can be rehydrated (preserves interactivity)
+  })();
+
+  const skill3Promise = (async () => {
+    const skillStartedAt = performance.now();
     try {
-      window.__lastAnalysisSnapshot = {
-        marketData: marketData || null,
-        llmAnalysis: llmAnalysis || null,
-        charts: charts || null,
-        edaInsights: edaInsights || null,
-        recommendation: rec || null,
-        timeHorizon: timeHorizon || 'MEDIUM',
-      };
-    } catch (e) {
-      window.__lastAnalysisSnapshot = null;
+      // Note: passing null for edaInsights here as it's running in parallel.
+      // The backend now uses precomputed edaFactors from marketData.technicalIndicators.
+      const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
+        method: 'POST', headers: getLlmHeaders(),
+        body: JSON.stringify({ marketData, edaInsights: null, timeHorizon }),
+      });
+      const d3 = await readApiJson(r3);
+      rec = d3.recommendation;
+      
+      // Fetch backtest-style decision
+      try {
+        const rbt = await apiFetch(`${API_BASE}/skills/trade-recommendation/backtest-action`, {
+          method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ priceHistory: marketData.priceHistory, timeHorizon }),
+        });
+        const dbt = await readApiJson(rbt);
+        if (rbt.ok && !dbt.error) {
+          rec.backtestView = dbt;
+        }
+      } catch (e) { /* ignore */ }
+
+      setPillState(3, 'done');
+      addMessage('bot', `✓ ${rec.action} — ${rec.confidence}% confidence (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's3', label: '③ trade-recommendation' });
+      renderRecommendation(rec, panel);
+      return d3;
+    } catch (err) {
+      if (isAbortError(err)) return null;
+      setPillState(3, '');
+      addMessage('bot', `Recommendation engine failed.`);
+      return null;
     }
-    addMessage('bot', `⏱ Total pipeline time: ${formatDurationMs(performance.now() - pipelineStartedAt)}`);
-  } catch (err) {
-    if (isAbortError(err)) return;
-    setPillState(3, '');
-    removeLoadingMsg();
-    addMessage('bot', `Recommendation engine failed.`);
+  })();
+
+  await Promise.all([skill2Promise, skill3Promise]);
+  removeLoadingMsg();
+
+  // Save snapshot for rehydration
+  try {
+    window.__lastAnalysisSnapshot = {
+      marketData: marketData || null,
+      llmAnalysis: llmAnalysis || null,
+      charts: charts || null,
+      edaInsights: edaInsights || null,
+      recommendation: rec || null,
+      timeHorizon: timeHorizon || 'MEDIUM',
+    };
+  } catch (e) {
+    window.__lastAnalysisSnapshot = null;
   }
+  
+  addMessage('bot', `⏱ Total pipeline time: ${formatDurationMs(performance.now() - pipelineStartedAt)}`);
 }
 
 async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {

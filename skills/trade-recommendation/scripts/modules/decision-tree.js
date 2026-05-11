@@ -93,6 +93,8 @@ function buildDecisionTree({
 
   const uncategorizedSignals = signalPool.filter((signal) => !assignedBuckets.has(signal.bucket));
   if (uncategorizedSignals.length) {
+    const unmappedBuckets = [...new Set(uncategorizedSignals.map(s => s.bucket))];
+    console.warn(`[Trade Recommendation] Taxonomy parity warning: Unmapped signal buckets found: ${unmappedBuckets.join(', ')}`);
     const netScore = parseFloat(
       uncategorizedSignals.reduce((sum, signal) => sum + signal.points, 0).toFixed(1)
     );

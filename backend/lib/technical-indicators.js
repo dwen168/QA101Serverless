@@ -292,6 +292,79 @@ function calculateVaR(priceHistory, confidence = 0.95) {
   };
 }
 
+/**
+ * Compute EDA engineered factors (breakouts, volume regimes, volatility regimes, trend strength).
+ * These are synchronous calculations used for signal scoring and LLM context.
+ */
+function computeEdaFactors(priceHistory) {
+  if (!Array.isArray(priceHistory) || priceHistory.length < 25) {
+    return {
+      available: false,
+      breakoutSignal: 'NEUTRAL',
+      breakout20Pct: 0,
+      volumeRegime: 'NORMAL',
+      volumeRatio: 1,
+      volatilityRegime: 'NORMAL',
+      volatility20: 0,
+      trendStrengthPct: 0,
+      trendStrengthSignal: 'NEUTRAL',
+    };
+  }
+
+  const closes = priceHistory.map((bar) => safeNumber(bar.close)).filter((value) => value > 0);
+  const currentPrice = closes[closes.length - 1];
+  const prev20 = closes.slice(-21, -1);
+  const highest20 = Math.max(...prev20);
+  const lowest20 = Math.min(...prev20);
+  const breakout20Pct = highest20 > 0 ? ((currentPrice - highest20) / highest20) * 100 : 0;
+  const breakdown20Pct = lowest20 > 0 ? ((currentPrice - lowest20) / lowest20) * 100 : 0;
+
+  const breakoutSignal = breakout20Pct > 1
+    ? 'BULLISH_BREAKOUT'
+    : breakdown20Pct < -1
+      ? 'BEARISH_BREAKDOWN'
+      : 'NEUTRAL';
+
+  const volumes = priceHistory.map((bar) => safeNumber(bar.volume)).filter((v) => v >= 0);
+  const latestVolume = volumes[volumes.length - 1];
+  const avgVolume20 = volumes.slice(-20).reduce((sum, v) => sum + v, 0) / Math.min(20, volumes.length);
+  const volumeRatio = avgVolume20 > 0 ? parseFloat((latestVolume / avgVolume20).toFixed(2)) : 1;
+  const volumeRegime = volumeRatio >= 1.3 ? 'HIGH' : volumeRatio <= 0.7 ? 'LOW' : 'NORMAL';
+
+  const returns = [];
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) {
+      returns.push(Math.log(closes[i] / closes[i - 1]));
+    }
+  }
+  const recentReturns = returns.slice(-20);
+  const mean = recentReturns.length > 0
+    ? recentReturns.reduce((sum, value) => sum + value, 0) / recentReturns.length
+    : 0;
+  const variance = recentReturns.length > 0
+    ? recentReturns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / recentReturns.length
+    : 0;
+  const volatility20 = parseFloat((Math.sqrt(Math.max(0, variance)) * Math.sqrt(252) * 100).toFixed(2));
+  const volatilityRegime = volatility20 > 40 ? 'HIGH' : volatility20 < 18 ? 'LOW' : 'NORMAL';
+
+  const ma20 = closes.slice(-20).reduce((sum, v) => sum + v, 0) / Math.min(20, closes.length);
+  const ma50 = closes.slice(-50).reduce((sum, v) => sum + v, 0) / Math.min(50, closes.length);
+  const trendStrengthPct = ma50 > 0 ? parseFloat((((ma20 - ma50) / ma50) * 100).toFixed(2)) : 0;
+  const trendStrengthSignal = trendStrengthPct > 2 ? 'STRONG_UP' : trendStrengthPct < -2 ? 'STRONG_DOWN' : 'NEUTRAL';
+
+  return {
+    available: true,
+    breakoutSignal,
+    breakout20Pct: parseFloat(breakout20Pct.toFixed(2)),
+    volumeRegime,
+    volumeRatio,
+    volatilityRegime,
+    volatility20,
+    trendStrengthPct,
+    trendStrengthSignal,
+  };
+}
+
 // Calculate all technical indicators
 function calculateAllIndicators(priceData) {
   if (!priceData || priceData.length < 20) {
@@ -312,6 +385,7 @@ function calculateAllIndicators(priceData) {
     vwap: calculateVWAP(priceData),
     atr14: calculateATR(priceData, 14),
     var95: calculateVaR(priceData, 0.95),
+    edaFactors: computeEdaFactors(priceData),
     calculatedAt: new Date().toISOString(),
   };
 }
@@ -324,6 +398,7 @@ module.exports = {
   calculateVWAP,
   calculateATR,
   calculateVaR,
+  computeEdaFactors,
   calculateAllIndicators,
   calculateEMA,
   calculateEMASeries,

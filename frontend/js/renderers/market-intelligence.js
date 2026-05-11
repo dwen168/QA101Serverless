@@ -33,6 +33,59 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   const sectorTrends = Array.isArray(d.sectorTrends) ? d.sectorTrends : [];
   const benchmarkTrend = d.benchmarkTrend && Array.isArray(d.benchmarkTrend.history) ? d.benchmarkTrend : null;
   const monetaryPolicy = macro.monetaryPolicy || {};
+  const isLikelyPeerSymbol = (value) => /^[A-Z0-9][A-Z0-9.^=-]{0,14}$/.test(String(value || '').trim().toUpperCase());
+  const parsePeerPayload = (value) => {
+    if (value && typeof value === 'object' && Array.isArray(value.data)) {
+      return value.data;
+    }
+    if (typeof value !== 'string') return value;
+
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+
+    return value;
+  };
+  const normalizePeerComparisonArray = (value) => {
+    const parsed = parsePeerPayload(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item) => item && typeof item === 'object' && String(item.symbol || '').trim());
+    }
+    if (parsed && typeof parsed === 'object' && String(parsed.symbol || '').trim()) {
+      return [parsed];
+    }
+    return [];
+  };
+  const normalizePeerSymbolArray = (value) => {
+    const parsed = parsePeerPayload(value);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => {
+          if (typeof item === 'string') return item.trim().toUpperCase();
+          if (item && typeof item === 'object') {
+            return String(item.symbol || item.ticker || item.code || '').trim().toUpperCase();
+          }
+          return '';
+        })
+        .filter((item) => isLikelyPeerSymbol(item));
+    }
+    if (typeof parsed === 'string') {
+      return parsed
+        .split(/[,;\n]+/)
+        .map((item) => item.trim().toUpperCase())
+        .filter((item) => isLikelyPeerSymbol(item));
+    }
+    return [];
+  };
+  const peerComparisons = normalizePeerComparisonArray(d.peerComparisons);
+  const peerSymbols = normalizePeerSymbolArray(d.peers).slice(0, 8);
   const renderMacroThemeChip = (theme) => `<span class="detail-chip macro-theme-chip">${String(theme || 'GENERAL_MACRO').replace(/_/g, ' ')}</span>`;
   const renderPolicyChip = (policy) => {
     const bias = String(policy?.bias || 'WATCH').toUpperCase();
@@ -278,13 +331,11 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       <div class="stat-item"><span class="stat-label">FREE CASH FLOW</span><span class="stat-value">${fcf ? '$' + (fcf >= 1e9 ? (fcf / 1e9).toFixed(2) + 'B' : (fcf / 1e6).toFixed(2) + 'M') : '—'}</span></div>
       <div class="stat-item"><span class="stat-label">EARNINGS SURPRISE</span><span class="stat-value">${beatLabel}</span></div>
       <div class="stat-item"><span class="stat-label">INSIDER (NET)</span><span class="stat-value">${netShares > 0 ? '<span style="color:var(--green)">+' + (netShares/1000).toFixed(1) + 'k</span>' : netShares < 0 ? '<span style="color:var(--red)">' + (netShares/1000).toFixed(1) + 'k</span>' : '—'}</span></div>
-      <div class="stat-item"><span class="stat-label">PEERS</span><span class="stat-value" style="font-size:10px">${(d.peers || []).slice(0, 3).join(', ') || '—'}</span></div>
+      <div class="stat-item"><span class="stat-label">PEERS</span><span class="stat-value" style="font-size:10px">${peerSymbols.slice(0, 3).join(', ') || '—'}</span></div>
     </div>
   `;
   panel.appendChild(advCard);
 
-  const peerComparisons = Array.isArray(d.peerComparisons) ? d.peerComparisons : [];
-  const peerSymbols = Array.isArray(d.peers) ? d.peers.slice(0, 8) : [];
   if (peerComparisons.length > 0 || peerSymbols.length > 0) {
     const peerCompareWrap = document.createElement('div');
     peerCompareWrap.className = 'fade-in';

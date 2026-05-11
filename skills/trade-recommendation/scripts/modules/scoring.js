@@ -360,8 +360,8 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     }
   }
 
-  // EDA engineered factors (small overlay weights)
-  const edaFactors = edaInsights?.edaFactors || {};
+  // EDA engineered factors (precomputed in Skill 1 or from edaInsights)
+  const edaFactors = edaInsights?.edaFactors || marketData?.technicalIndicators?.edaFactors || {};
   if (edaFactors.available) {
     if (edaFactors.breakoutSignal === 'BULLISH_BREAKOUT') {
       add('EDA Breakout', w('eda_breakout_bullish') || 0.5, 'Price broke above recent 20-day range.', [

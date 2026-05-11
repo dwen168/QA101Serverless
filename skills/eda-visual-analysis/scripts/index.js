@@ -1,80 +1,13 @@
 const { callDeepSeek } = require('../../../backend/lib/llm');
 const { loadSkills } = require('../../../backend/lib/skill-loader');
 const { computeMovingAverage, parseJsonResponse, requireObject } = require('../../../backend/lib/utils');
+const { computeEdaFactors } = require('../../../backend/lib/technical-indicators');
 
 const skills = loadSkills();
 
 function safeNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
-}
-
-function computeEdaFactors(marketData) {
-  const priceHistory = Array.isArray(marketData?.priceHistory) ? marketData.priceHistory : [];
-  const closes = priceHistory.map((bar) => safeNumber(bar.close)).filter((value) => value > 0);
-  if (closes.length < 25) {
-    return {
-      available: false,
-      breakoutSignal: 'NEUTRAL',
-      breakout20Pct: 0,
-      volumeRegime: 'NORMAL',
-      volumeRatio: 1,
-      volatilityRegime: 'NORMAL',
-      volatility20: 0,
-      trendStrengthPct: 0,
-      trendStrengthSignal: 'NEUTRAL',
-    };
-  }
-
-  const currentPrice = safeNumber(marketData.price, closes[closes.length - 1]);
-  const prev20 = closes.slice(-21, -1);
-  const highest20 = Math.max(...prev20);
-  const lowest20 = Math.min(...prev20);
-  const breakout20Pct = highest20 > 0 ? ((currentPrice - highest20) / highest20) * 100 : 0;
-  const breakdown20Pct = lowest20 > 0 ? ((currentPrice - lowest20) / lowest20) * 100 : 0;
-
-  const breakoutSignal = breakout20Pct > 1
-    ? 'BULLISH_BREAKOUT'
-    : breakdown20Pct < -1
-      ? 'BEARISH_BREAKDOWN'
-      : 'NEUTRAL';
-
-  const volumeRatioRaw = safeNumber(marketData.volume) / Math.max(1, safeNumber(marketData.avgVolume, 1));
-  const volumeRatio = parseFloat(volumeRatioRaw.toFixed(2));
-  const volumeRegime = volumeRatio >= 1.3 ? 'HIGH' : volumeRatio <= 0.7 ? 'LOW' : 'NORMAL';
-
-  const returns = [];
-  for (let i = 1; i < closes.length; i++) {
-    if (closes[i - 1] > 0) {
-      returns.push(Math.log(closes[i] / closes[i - 1]));
-    }
-  }
-  const recentReturns = returns.slice(-20);
-  const mean = recentReturns.length > 0
-    ? recentReturns.reduce((sum, value) => sum + value, 0) / recentReturns.length
-    : 0;
-  const variance = recentReturns.length > 0
-    ? recentReturns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / recentReturns.length
-    : 0;
-  const volatility20 = parseFloat((Math.sqrt(Math.max(0, variance)) * Math.sqrt(252) * 100).toFixed(2));
-  const volatilityRegime = volatility20 > 40 ? 'HIGH' : volatility20 < 18 ? 'LOW' : 'NORMAL';
-
-  const ma20 = safeNumber(marketData.ma20);
-  const ma50 = safeNumber(marketData.ma50);
-  const trendStrengthPct = ma50 > 0 ? parseFloat((((ma20 - ma50) / ma50) * 100).toFixed(2)) : 0;
-  const trendStrengthSignal = trendStrengthPct > 2 ? 'STRONG_UP' : trendStrengthPct < -2 ? 'STRONG_DOWN' : 'NEUTRAL';
-
-  return {
-    available: true,
-    breakoutSignal,
-    breakout20Pct: parseFloat(breakout20Pct.toFixed(2)),
-    volumeRegime,
-    volumeRatio,
-    volatilityRegime,
-    volatility20,
-    trendStrengthPct,
-    trendStrengthSignal,
-  };
 }
 
 function buildCharts(marketData) {
@@ -160,7 +93,7 @@ function buildCharts(marketData) {
 }
 
 function buildFallbackInsights(marketData) {
-  const edaFactors = computeEdaFactors(marketData);
+  const edaFactors = marketData?.technicalIndicators?.edaFactors || computeEdaFactors(marketData.priceHistory);
   return {
     insights: [
       `RSI at ${marketData.rsi} - ${marketData.rsi > 70 ? 'overbought territory' : marketData.rsi < 30 ? 'oversold territory' : 'healthy range'}`,
@@ -230,8 +163,22 @@ async function runEdaVisualAnalysis({ marketData }, dependencies = {}) {
   const charts = buildCharts(marketData);
   const fallback = buildFallbackInsights(marketData);
   const llm = dependencies.callDeepSeek || callDeepSeek;
-  const systemPrompt = `You are a quantitative analyst running the eda-visual-analysis skill.\n\n${skills['eda-visual-analysis']}\n\nAnalyze the market data and provide key EDA insights as JSON only. Do not include markdown, tables, explanations, or code fences.`;
-  const userMessage = `Provide EDA insights for ${marketData.ticker}. Return JSON with: insights (array of 4 key observations), riskFlags (array of strings), technicalSummary (1-2 sentences), momentumSignal (POSITIVE/NEGATIVE/NEUTRAL).\n\nContext:\n- Price=${marketData.price}, Change%=${marketData.changePercent}, RSI=${marketData.rsi}, Trend=${marketData.trend}\n- MA20=${marketData.ma20}, MA50=${marketData.ma50}, MA200=${marketData.ma200}\n- SentimentScore=${marketData.sentimentScore}, SentimentLabel=${marketData.sentimentLabel}\n- MacroRisk=${marketData.macroContext?.riskLevel || 'N/A'}, MacroTone=${marketData.macroContext?.sentimentLabel || 'N/A'}\n- MacroContext=${marketData.macroContext?.marketContext || 'N/A'}\n- TopNews=${(marketData.news || []).slice(0, 5).map((item) => `${item.title} [${item.sentiment}]`).join(' | ')}\n- Indicators=${JSON.stringify(marketData.technicalIndicators || {}, null, 2)}`;
+  const systemPrompt = `You are a senior quantitative analyst. Analyze market data and provide key Exploratory Data Analysis (EDA) insights.
+
+Your task:
+1. Provide 4 key observations in 'insights' (plain English, quantitative where possible).
+2. List 'riskFlags' (e.g., "Overbought - potential pullback risk").
+3. Write a 1-2 sentence 'technicalSummary' synthesizing the technical picture.
+4. Set 'momentumSignal' to POSITIVE, NEGATIVE, or NEUTRAL.
+
+Return JSON ONLY. Format:
+{
+  "insights": ["...", "...", "...", "..."],
+  "riskFlags": ["..."],
+  "technicalSummary": "...",
+  "momentumSignal": "..."
+}`;
+  const userMessage = `Provide EDA insights for ${marketData.ticker}.\n\nContext:\n- Price=${marketData.price}, Change%=${marketData.changePercent}, RSI=${marketData.rsi}, Trend=${marketData.trend}\n- MA20=${marketData.ma20}, MA50=${marketData.ma50}, MA200=${marketData.ma200}\n- SentimentScore=${marketData.sentimentScore}, SentimentLabel=${marketData.sentimentLabel}\n- MacroRisk=${marketData.macroContext?.riskLevel || 'N/A'}, MacroTone=${marketData.macroContext?.sentimentLabel || 'N/A'}\n- MacroContext=${marketData.macroContext?.marketContext || 'N/A'}\n- TopNews=${(marketData.news || []).slice(0, 5).map((item) => `${item.title} [${item.sentiment}]`).join(' | ')}\n- Indicators=${JSON.stringify(marketData.technicalIndicators || {}, null, 2)}`;
 
   try {
     const analysis = await llm(systemPrompt, userMessage);

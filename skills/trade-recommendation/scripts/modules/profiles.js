@@ -1,3 +1,5 @@
+const { getAllWeights } = require('../../../../backend/lib/weights-loader');
+
 function normalizeTimeHorizon(value = 'MEDIUM') {
   const normalized = String(value || '').trim().toUpperCase();
   return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
@@ -5,12 +7,33 @@ function normalizeTimeHorizon(value = 'MEDIUM') {
 
 function getActionThresholds(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
-  const thresholds = {
+  
+  // Calculate dynamic maximum possible score to scale thresholds
+  const weights = getAllWeights();
+  const positiveWeights = Object.values(weights).filter(v => v > 0);
+  const theoreticalMax = positiveWeights.reduce((sum, v) => sum + v, 0);
+  
+  // Realistic max is lower because signals are mutually exclusive (e.g. can't be overbought and oversold)
+  // Assuming realistic max is about 40% of theoretical max. If theoretical max is 20, realistic is 8.
+  const realisticMax = Math.max(10, theoreticalMax * 0.4); 
+  const scale = realisticMax / 10; // 10 is the baseline realistic max we used previously
+
+  const baseThresholds = {
     SHORT: { strongBuy: 7, buy: 4, holdLow: -2, holdHigh: 2, sell: -4, strongSell: -7 },
     MEDIUM: { strongBuy: 7, buy: 4, holdLow: -2, holdHigh: 2, sell: -4, strongSell: -7 },
     LONG: { strongBuy: 8, buy: 5, holdLow: -2, holdHigh: 2, sell: -5, strongSell: -8 },
   };
-  return thresholds[normalized];
+  
+  const thresholds = baseThresholds[normalized];
+  
+  return {
+    strongBuy: parseFloat((thresholds.strongBuy * scale).toFixed(1)),
+    buy: parseFloat((thresholds.buy * scale).toFixed(1)),
+    holdLow: parseFloat((thresholds.holdLow * scale).toFixed(1)),
+    holdHigh: parseFloat((thresholds.holdHigh * scale).toFixed(1)),
+    sell: parseFloat((thresholds.sell * scale).toFixed(1)),
+    strongSell: parseFloat((thresholds.strongSell * scale).toFixed(1)),
+  };
 }
 
 function mapActionFromScore(score, timeHorizon = 'MEDIUM') {

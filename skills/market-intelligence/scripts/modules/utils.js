@@ -4,12 +4,22 @@ const REAL_DATA_TIMEOUT_MS = config.realDataTimeoutMs;
 const ENRICHMENT_TIMEOUT_MS = Math.min(5000, REAL_DATA_TIMEOUT_MS);
 
 function safeNumber(value, fallback = 0) {
+  if (value && typeof value === 'object' && 'raw' in value) {
+    return safeNumber(value.raw, fallback);
+  }
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
 }
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function safeString(value, fallback = '') {
+  if (value && typeof value === 'object') {
+    return String(value.fmt || value.raw || JSON.stringify(value));
+  }
+  return value != null ? String(value) : fallback;
 }
 
 function average(values) {
@@ -56,36 +66,18 @@ async function resolveArticleSourceLabel(articleUrl, fallbackSource = 'Unknown')
   if (!rawUrl) return fallbackSource;
 
   try {
-    const initial = new URL(rawUrl);
-    const initialHost = normalizeHostname(initial.hostname);
-    if (initialHost && initialHost !== 'finnhub.io') {
-      return hostnameToSourceLabel(initialHost, fallbackSource);
+    const urlObj = new URL(rawUrl);
+    const host = normalizeHostname(urlObj.hostname);
+    if (host && host !== 'finnhub.io' && host !== 'news.google.com') {
+      return hostnameToSourceLabel(host, fallbackSource);
     }
   } catch {
-    return fallbackSource;
+    // ignore
   }
 
-  try {
-    const response = await withTimeout(
-      fetch(rawUrl, { method: 'HEAD', redirect: 'follow' }),
-      ENRICHMENT_TIMEOUT_MS,
-      `Resolve article source for ${rawUrl}`
-    );
-    const finalHost = normalizeHostname(new URL(response.url).hostname);
-    return hostnameToSourceLabel(finalHost, fallbackSource);
-  } catch {
-    try {
-      const response = await withTimeout(
-        fetch(rawUrl, { method: 'GET', redirect: 'follow' }),
-        ENRICHMENT_TIMEOUT_MS,
-        `Resolve article source (GET fallback) for ${rawUrl}`
-      );
-      const finalHost = normalizeHostname(new URL(response.url).hostname);
-      return hostnameToSourceLabel(finalHost, fallbackSource);
-    } catch {
-      return fallbackSource;
-    }
-  }
+  // If it's a Finnhub or Google redirect, we just trust the fallbackSource 
+  // rather than performing expensive network round-trips to resolve it.
+  return fallbackSource;
 }
 
 function normalizeArticleKey(title) {
@@ -121,6 +113,7 @@ module.exports = {
   REAL_DATA_TIMEOUT_MS,
   ENRICHMENT_TIMEOUT_MS,
   safeNumber,
+  safeString,
   clamp,
   average,
   dedupeArticlesByTitle,

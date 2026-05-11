@@ -5,6 +5,7 @@ const {
   ENRICHMENT_TIMEOUT_MS, 
   REAL_DATA_TIMEOUT_MS, 
   safeNumber, 
+  safeString,
   average, 
   dedupeArticlesByTitle 
 } = require('./utils');
@@ -145,9 +146,23 @@ function isAsxMarket({ ticker = '', exchange = '', country = '' } = {}) {
   return upperTicker.endsWith('.AX') || upperExchange.includes('ASX') || upperCountry === 'AU' || upperCountry === 'AUS';
 }
 
+function coercePeerSymbol(value) {
+  const candidate = typeof value === 'object' && value
+    ? safeString(value.symbol || value.ticker || value.code)
+    : safeString(value);
+  const normalized = candidate.toUpperCase();
+
+  // Only keep plausible market symbols so malformed JSON blobs do not leak into the peer UI.
+  if (!/^[A-Z0-9][A-Z0-9.^=-]{0,14}$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
 function resolvePeerUniverse({ ticker, sector, exchange, country, peers = [] } = {}) {
   const baseTicker = String(ticker || '').toUpperCase();
-  const normalizedPeers = Array.from(new Set((peers || []).filter(Boolean).map((item) => String(item).toUpperCase())))
+  const normalizedPeers = Array.from(new Set((peers || []).map((item) => coercePeerSymbol(item)).filter(Boolean)))
     .filter((symbol) => symbol !== baseTicker)
     .slice(0, 6);
 
@@ -365,7 +380,7 @@ function buildTradingScore({ return3m, rsi, volumeRatio }) {
 }
 
 async function fetchPeerComparisons(baseTicker, peersInput = []) {
-  const peers = Array.from(new Set((peersInput || []).filter(Boolean)))
+  const peers = Array.from(new Set((peersInput || []).map((item) => coercePeerSymbol(item)).filter(Boolean)))
     .filter((symbol) => String(symbol).toUpperCase() !== String(baseTicker).toUpperCase())
     .slice(0, 6);
   if (peers.length === 0) return [];
@@ -425,8 +440,8 @@ async function fetchPeerComparisons(baseTicker, peersInput = []) {
     const tradingScore = buildTradingScore({ return3m, rsi, volumeRatio });
 
     return {
-      symbol,
-      name: price.longName || price.shortName || symbol,
+      symbol: safeString(symbol),
+      name: safeString(price.longName || price.shortName || symbol),
       marketCap,
       pe,
       eps,
@@ -561,30 +576,43 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
 
   const companyName = profile?.name || `${ticker} Corp.`;
   const sector = profile?.sector || 'Unknown';
-  const sectorTrends = await fetchSectorTrends(sector);
-  const benchmarkTrend = await fetchBenchmarkTrend({
-    ticker,
-    exchange: profile?.exchange,
-    country: yahooProfile?.country || profile?.country,
-  });
-  const peerSymbols = resolvePeerUniverse({
-    ticker,
-    sector,
-    exchange: profile?.exchange,
-    country: yahooProfile?.country || profile?.country,
-    peers,
-  });
-  const peerComparisons = await fetchPeerComparisons(ticker, peerSymbols);
 
-  const [companyNewsResult, finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
+  const [companyNewsResult, macroNewsResult, fedDecisionResult, rbaDecisionResult, sectorTrendsResult, benchmarkTrendResult, peerComparisonsResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubNews(ticker, {
       sector,
       companyName,
     }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
-    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
-    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+    (async () => {
+      const [f, n] = await Promise.all([
+        withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+        withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+      ]);
+      return buildMacroNewsWithFallback({
+        ticker,
+        sector,
+        finnhubMacroNews: f,
+        newsApiMacroNews: n,
+        dependencies,
+      });
+    })(),
     withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
     withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
+    withTimeout(fetchSectorTrends(sector), ENRICHMENT_TIMEOUT_MS, `Sector trends for ${sector}`),
+    withTimeout(fetchBenchmarkTrend({
+      ticker,
+      exchange: profile?.exchange,
+      country: yahooProfile?.country || profile?.country,
+    }), ENRICHMENT_TIMEOUT_MS, `Benchmark trend for ${ticker}`),
+    (async () => {
+      const resolvedPeers = resolvePeerUniverse({
+        ticker,
+        sector,
+        exchange: profile?.exchange,
+        country: yahooProfile?.country || profile?.country,
+        peers,
+      });
+      return await fetchPeerComparisons(ticker, resolvedPeers);
+    })(),
   ]);
 
   let companyNews = companyNewsResult.status === 'fulfilled' ? companyNewsResult.value : [];
@@ -605,19 +633,14 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     }
   }
 
-  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
-  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
+  const macroNews = macroNewsResult.status === 'fulfilled' ? macroNewsResult.value : [];
   const policyDecisions = {
     fed: fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null,
     rba: rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null,
   };
-  const macroNews = await buildMacroNewsWithFallback({
-    ticker,
-    sector,
-    finnhubMacroNews,
-    newsApiMacroNews,
-    dependencies,
-  });
+  const sectorTrends = sectorTrendsResult.status === 'fulfilled' ? sectorTrendsResult.value : [];
+  const benchmarkTrend = benchmarkTrendResult.status === 'fulfilled' ? benchmarkTrendResult.value : null;
+  const peerComparisons = peerComparisonsResult.status === 'fulfilled' ? peerComparisonsResult.value : [];
 
   const sentimentScore = Array.isArray(companyNews) && companyNews.length > 0
     ? parseFloat((companyNews.reduce((sum, article) => sum + safeNumber(article.sentiment), 0) / companyNews.length).toFixed(2))
@@ -644,6 +667,14 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     targetLow = price * 0.9;
     targetMean = (targetHigh + targetLow) / 2;
   }
+
+  const resolvedPeers = resolvePeerUniverse({
+    ticker,
+    sector,
+    exchange: profile?.exchange,
+    country: yahooProfile?.country || profile?.country,
+    peers,
+  });
 
   return {
     ticker,
@@ -680,7 +711,7 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
     earningsSurprise,
-    peers: peerSymbols,
+    peers: resolvedPeers,
     peerComparisons,
     news: Array.isArray(companyNews) ? companyNews : [],
     macroContext: buildMacroContext({
@@ -839,7 +870,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const startNews = Date.now();
   const isAsx = ticker.toUpperCase().endsWith('.AX');
   
-  const [yahooNews, macroNews, shortMetrics, fedDecision, rbaDecision] = await Promise.all([
+  const [yahooNews, macroNews, shortMetrics, fedDecision, rbaDecision, peerSymbols, sectorTrends, benchmarkTrend] = await Promise.all([
     (async () => {
       try {
         const companyName = priceMod.longName || priceMod.shortName || ticker;
@@ -998,19 +1029,49 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
     })(),
     (async () => {
       try {
-        return await withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`);
-      } catch {
-        return null;
-      }
-    })(),
-    (async () => {
-      try {
         return await withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`);
       } catch {
         return null;
       }
     })(),
+    (async () => {
+      if (!config.finnhubApiKey) return [];
+      try {
+        return await withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`);
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      const label = normalizeSector(sp.sector || sp.industry || 'Unknown');
+      try {
+        return await withTimeout(fetchSectorTrends(label), ENRICHMENT_TIMEOUT_MS, `Sector trends for ${label}`);
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchBenchmarkTrend({
+          ticker,
+          exchange: priceMod.exchangeName,
+          country: sp.country,
+        }), ENRICHMENT_TIMEOUT_MS, `Benchmark trend for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
   ]);
+
+  const sectorLabel = normalizeSector(sp.sector || sp.industry || 'Unknown');
+  const resolvedYahooPeers = resolvePeerUniverse({
+    ticker,
+    sector: sectorLabel,
+    exchange: priceMod.exchangeName,
+    country: sp.country,
+    peers: peerSymbols,
+  });
+  const peerComparisons = await fetchPeerComparisons(ticker, resolvedYahooPeers);
   perfMs.newsTotal = Date.now() - startNews;
 
   const sentimentScore = yahooNews.length > 0
@@ -1022,33 +1083,10 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const targetHigh = safeNumber(fd.targetHighPrice) || (price * 1.12);
   const targetLow = safeNumber(fd.targetLowPrice) || (price * 0.9);
   const effectiveTargetMean = targetMean || (targetHigh + targetLow) / 2;
-  const sectorLabel = normalizeSector(sp.sector || sp.industry || 'Unknown');
-  let peerSymbols = [];
-  if (config.finnhubApiKey) {
-    try {
-      peerSymbols = await withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`);
-    } catch {
-      peerSymbols = [];
-    }
-  }
-  const resolvedYahooPeers = resolvePeerUniverse({
-    ticker,
-    sector: sectorLabel,
-    exchange: priceMod.exchangeName,
-    country: sp.country,
-    peers: peerSymbols,
-  });
-  const peerComparisons = await fetchPeerComparisons(ticker, resolvedYahooPeers);
-  const sectorTrends = await fetchSectorTrends(sectorLabel);
-  const benchmarkTrend = await fetchBenchmarkTrend({
-    ticker,
-    exchange: priceMod.exchangeName,
-    country: sp.country,
-  });
 
   return {
     ticker,
-    name: priceMod.longName || priceMod.shortName || `${ticker}`,
+    name: safeString(priceMod.longName || priceMod.shortName || ticker),
     description: (sp.longBusinessSummary || '').substring(0, 500) || null,
     sector: normalizeSector(sp.sector || sp.industry || 'Unknown'),
     industry: sp.industry || null,
@@ -1180,84 +1218,96 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
 
   let finnhubProfile = null;
   let finnhubMetrics = null;
-  let finnhubNews = [];
   let finnhubRecommendations = null;
   let finnhubPriceTarget = null;
   let finnhubPeers = [];
 
-  let finnhubMacroNews = [];
-  let newsApiMacroNews = [];
-  let fedDecision = null;
-  let rbaDecision = null;
-
   if (config.finnhubApiKey) {
-    const enrichmentResults = await Promise.allSettled([
+    const coreResults = await Promise.allSettled([
       withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
       withTimeout(fetchFinnhubMetrics(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub metrics fetch for ${ticker}`),
-      withTimeout(fetchFinnhubNews(ticker, {
-        sector: finnhubProfile?.sector || 'Unknown',
-        companyName: finnhubProfile?.name || `${ticker} Corp.`,
-      }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
       withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
       withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
-      withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
-      withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
-      withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
-      withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
       withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`),
     ]);
-
-    finnhubProfile = enrichmentResults[0].status === 'fulfilled' ? enrichmentResults[0].value : null;
-    finnhubMetrics = enrichmentResults[1].status === 'fulfilled' ? enrichmentResults[1].value : null;
-    finnhubNews = enrichmentResults[2].status === 'fulfilled' ? enrichmentResults[2].value : [];
-    finnhubRecommendations = enrichmentResults[3].status === 'fulfilled' ? enrichmentResults[3].value : null;
-    finnhubPriceTarget = enrichmentResults[4].status === 'fulfilled' ? enrichmentResults[4].value : null;
-    finnhubMacroNews = enrichmentResults[5].status === 'fulfilled' ? enrichmentResults[5].value : [];
-    newsApiMacroNews = enrichmentResults[6].status === 'fulfilled' ? enrichmentResults[6].value : [];
-    fedDecision = enrichmentResults[7].status === 'fulfilled' ? enrichmentResults[7].value : null;
-    rbaDecision = enrichmentResults[8].status === 'fulfilled' ? enrichmentResults[8].value : null;
-    finnhubPeers = enrichmentResults[9].status === 'fulfilled' ? enrichmentResults[9].value : [];
-  } else {
-    const [finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
-      withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
-      withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
-      withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
-      withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
-    ]);
-    finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
-    newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
-    fedDecision = fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null;
-    rbaDecision = rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null;
+    finnhubProfile = coreResults[0].status === 'fulfilled' ? coreResults[0].value : null;
+    finnhubMetrics = coreResults[1].status === 'fulfilled' ? coreResults[1].value : null;
+    finnhubRecommendations = coreResults[2].status === 'fulfilled' ? coreResults[2].value : null;
+    finnhubPriceTarget = coreResults[3].status === 'fulfilled' ? coreResults[3].value : null;
+    finnhubPeers = coreResults[4].status === 'fulfilled' ? coreResults[4].value : [];
   }
 
   const name = finnhubProfile?.name || `${ticker} Corp.`;
   const sector = finnhubProfile?.sector || 'Unknown';
-  const sectorTrends = await fetchSectorTrends(sector);
-  const benchmarkTrend = await fetchBenchmarkTrend({
-    ticker,
-    exchange: finnhubProfile?.exchange,
-    country: finnhubProfile?.country,
-  });
-  const resolvedAlphaPeers = resolvePeerUniverse({
+
+  const [finnhubNews, macroNews, fedDecision, rbaDecision, sectorTrends, benchmarkTrend] = await Promise.all([
+    (async () => {
+      if (!config.finnhubApiKey) return [];
+      try {
+        return await withTimeout(fetchFinnhubNews(ticker, {
+          sector,
+          companyName: name,
+        }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`);
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      try {
+        const [f, n] = await Promise.all([
+          withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+          withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+        ]);
+        return await buildMacroNewsWithFallback({
+          ticker,
+          sector,
+          finnhubMacroNews: f,
+          newsApiMacroNews: n,
+          dependencies,
+        });
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchSectorTrends(sector), ENRICHMENT_TIMEOUT_MS, `Sector trends for ${sector}`);
+      } catch {
+        return [];
+      }
+    })(),
+    (async () => {
+      try {
+        return await withTimeout(fetchBenchmarkTrend({ ticker }), ENRICHMENT_TIMEOUT_MS, `Benchmark trend for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
+  ]);
+
+  const resolvedPeers = resolvePeerUniverse({
     ticker,
     sector,
-    exchange: finnhubProfile?.exchange,
-    country: finnhubProfile?.country,
     peers: finnhubPeers,
   });
-  const peerComparisons = await fetchPeerComparisons(ticker, resolvedAlphaPeers);
-  const pe = finnhubMetrics?.pe || 0;
-  const eps = finnhubMetrics?.eps || 0;
-  const marketCap = finnhubProfile?.marketCap || 0;
-  const macroNews = await scoreMacroNewsWithLlm(
-    [...finnhubMacroNews, ...newsApiMacroNews],
-    { ticker, sector },
-    dependencies
-  );
+  const peerComparisons = await fetchPeerComparisons(ticker, resolvedPeers);
 
-  const news = Array.isArray(finnhubNews) && finnhubNews.length > 0 ? finnhubNews : [];
-  const sentimentScore = news.length > 0
-    ? parseFloat((news.reduce((sum, n) => sum + (n.sentiment || 0), 0) / news.length).toFixed(2))
+  const sentimentScore = finnhubNews.length > 0
+    ? parseFloat((finnhubNews.reduce((sum, n) => sum + (n.sentiment || 0), 0) / finnhubNews.length).toFixed(2))
     : 0;
   const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
 
@@ -1292,9 +1342,9 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     avgVolume: Math.floor(avgVolume),
     high52w: parseFloat((Math.max(...highs)).toFixed(2)),
     low52w: parseFloat((Math.min(...lows)).toFixed(2)),
-    marketCap,
-    pe,
-    eps,
+    marketCap: finnhubProfile?.marketCap || 0,
+    pe: finnhubMetrics?.pe || 0,
+    eps: finnhubMetrics?.eps || 0,
     ma20: parseFloat(ma20.toFixed(2)),
     ma50: parseFloat(ma50.toFixed(2)),
     ma200: parseFloat(ma200.toFixed(2)),
@@ -1307,11 +1357,11 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       targetHigh: parseFloat(targetHigh.toFixed(2)),
       targetLow: parseFloat(targetLow.toFixed(2)),
       targetMean: parseFloat(targetMean.toFixed(2)),
-      upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
+      upside: targetMean > 0 ? parseFloat((((targetMean - price) / price) * 100).toFixed(1)) : 0,
     },
-    peers: resolvedAlphaPeers,
+    peers: resolvedPeers,
     peerComparisons,
-    news,
+    news: finnhubNews,
     macroContext: buildMacroContext({
       ticker,
       sector,
@@ -1325,10 +1375,11 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'alpha-vantage',
+    fallbackReason: null,
     dataSourceBreakdown: {
       price: 'Alpha Vantage (Real)',
       technicals: 'Alpha Vantage (Real)',
-      news: news.length > 0 ? 'Finnhub (Real)' : 'No news found',
+      news: finnhubNews.length > 0 ? 'Finnhub (Real)' : 'No news found',
       macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
       sectorTrends: sectorTrends.length > 0 ? 'Yahoo Finance Sector ETFs (Real)' : 'Unavailable',
       benchmark: benchmarkTrend ? 'Yahoo Finance Benchmark Index (Real)' : 'Unavailable',
@@ -1337,7 +1388,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     finnhubData: {
       profile: !!finnhubProfile,
       metrics: !!finnhubMetrics,
-      news: news.length,
+      news: finnhubNews.length,
       recommendations: !!finnhubRecommendations,
       priceTarget: !!finnhubPriceTarget,
     },
