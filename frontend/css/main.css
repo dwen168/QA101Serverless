@@ -40,7 +40,8 @@
       radial-gradient(circle at top right, rgba(52,211,153,0.09), transparent 24%),
       linear-gradient(180deg, #08111e 0%, #07111f 48%, #091628 100%);
     color: var(--text);
-    height: 100vh;
+    height: 100vh; /* Fallback */
+    height: 100dvh; /* Dynamic viewport height for mobile */
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1499,14 +1500,18 @@
     flex-direction: column;
     padding: 12px;
     gap: 12px;
+    min-height: 0;
   }
   body.is-mobile .chat-panel {
     width: 100%;
     display: none;
+    min-height: 0;
   }
   body.is-mobile .analysis-panel {
     padding: 14px;
     display: none;
+    min-height: 0;
+    overflow-x: hidden;
   }
   
   body.is-mobile.show-chat .chat-panel {
@@ -1516,6 +1521,35 @@
   body.is-mobile.show-analysis .analysis-panel {
     display: flex;
     flex: 1;
+  }
+
+  body.is-mobile header {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  body.is-mobile .brand-summary {
+    display: none;
+  }
+  body.is-mobile .export-menu span {
+    display: none; /* Hide 'Export' and 'Reports' text, keep icon if any, or just reduce width */
+  }
+  body.is-mobile .export-btn {
+    padding: 6px 8px;
+  }
+  body.is-mobile .msg-bubble,
+  body.is-mobile .insight-item,
+  body.is-mobile .news-summary,
+  body.is-mobile .target-value,
+  body.is-mobile .pattern-stat-value {
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  body.is-mobile .signal-row {
+    flex-wrap: wrap;
+  }
+  body.is-mobile .detail-chip {
+    white-space: normal;
+    word-break: break-word;
   }
 
   body.is-mobile .llm-switcher {
