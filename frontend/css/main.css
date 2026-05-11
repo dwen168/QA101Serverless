@@ -1514,6 +1514,30 @@
     overflow-x: hidden;
   }
   
+  body.is-mobile .chat-panel-top,
+  body.is-mobile .composer-header {
+    display: none;
+  }
+  
+  body.is-mobile .chat-input-area {
+    padding: 10px 12px;
+  }
+  
+  body.is-mobile .quick-btns {
+    margin-bottom: 6px;
+    gap: 4px;
+  }
+  
+  body.is-mobile .quick-btn {
+    padding: 5px 10px;
+    font-size: 9px;
+  }
+
+  body.is-mobile .chat-input {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
   body.is-mobile.show-chat .chat-panel {
     display: flex;
     flex: 1;
