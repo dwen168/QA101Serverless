@@ -9,6 +9,7 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   const profile = getRecommendationProfile(timeHorizon);
   const eventRegimeOverlay = buildEventRegimeOverlay(marketData);
   const policyOverlay = buildPolicyOverlay(marketData);
+  const edaFactors = edaInsights?.edaFactors || marketData?.technicalIndicators?.edaFactors || {};
 
   const macroWeight = (key, fallback) => {
     const value = getSignalWeight(key);
@@ -80,18 +81,57 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   // Moderate downtrend: price below MA50 and MA50 < MA200
   const moderateDowntrend = !aboveMa50 && !ma50AboveMa200;
 
-  // Dynamic RSI thresholds (improvement 4):
-  //   In a strong uptrend RSI can "run hot" — raise the overbought bar to 80 to avoid
-  //   false sell signals; in a strong downtrend lower the oversold bar to 25 because
-  //   oversold readings in downtrends tend to keep falling.
-  const rsiOverboughtThreshold = strongUptrend ? 80 : 70;
-  const rsiOversoldThreshold   = strongDowntrend ? 25 : 30;
+  // ── RSI Divergence Detection ──
+  // Identify bullish/bearish divergence using local extrema if priceHistory is available.
+  let rsiBullishDivergence = false;
+  let rsiBearishDivergence = false;
+  const rsi = marketData.rsi;
+  
+  if (marketData.priceHistory && marketData.priceHistory.length > 20) {
+    const closes = marketData.priceHistory.map(bar => bar.close);
+    // Simple lookback to detect local extrema (10 periods)
+    const recentPrices = closes.slice(-10);
+    const olderPrices = closes.slice(-20, -10);
+    const recentMinPrice = Math.min(...recentPrices);
+    const olderMinPrice = Math.min(...olderPrices);
+    const recentMaxPrice = Math.max(...recentPrices);
+    const olderMaxPrice = Math.max(...olderPrices);
+    
+    // We approximate historical RSI for the extrema points by re-calculating or estimating.
+    // For a highly accurate system, historical RSI values would be pre-calculated. 
+    // Here we use a simplified proxy: if price made a lower low but RSI is > 30 (not oversold) and rising.
+    // Assuming `marketData.technicalIndicators.rsiSeries` isn't available, we rely on current RSI vs recent price action.
+    // Bullish Divergence Proxy: Price made a lower low recently, but current RSI is relatively strong (>40)
+    if (recentMinPrice < olderMinPrice && rsi > 40 && p > recentMinPrice * 1.02) {
+      rsiBullishDivergence = true;
+    }
+    // Bearish Divergence Proxy: Price made a higher high recently, but current RSI is relatively weak (<60)
+    if (recentMaxPrice > olderMaxPrice && rsi < 60 && p < recentMaxPrice * 0.98) {
+      rsiBearishDivergence = true;
+    }
+  }
+
+  // Dynamic RSI thresholds:
+  // Instead of static 70/30, adapt based on volatility if available, else use trend logic.
+  let baseOverbought = 70;
+  let baseOversold = 30;
+  if (edaFactors?.available) {
+    // High volatility assets have wider RSI ranges
+    if (edaFactors.volatilityRegime === 'HIGH') {
+       baseOverbought = 75;
+       baseOversold = 25;
+    } else if (edaFactors.volatilityRegime === 'LOW') {
+       baseOverbought = 65;
+       baseOversold = 35;
+    }
+  }
+
+  // Trend adjustments to thresholds
+  const rsiOverboughtThreshold = strongUptrend ? Math.min(85, baseOverbought + 10) : baseOverbought;
+  const rsiOversoldThreshold   = strongDowntrend ? Math.max(15, baseOversold - 5) : baseOversold;
 
   // RSI signals
-  const rsi = marketData.rsi;
   if (rsi > rsiOverboughtThreshold) {
-    // Improvement 3: in a strong confirmed uptrend the overbought signal is weaker
-    // (momentum can stay elevated), so we apply a 50 % dampening factor.
     const rawPoints = w('rsi_overbought');
     const dampened  = strongUptrend ? rawPoints * 0.5 : rawPoints;
     const trendNote = strongUptrend ? ' (dampened — strong uptrend in place)' : '';
@@ -108,14 +148,11 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       'oscillator'
     );
   } else if (rsi < rsiOversoldThreshold) {
-    // Improvement 3: in a strong downtrend an oversold RSI is NOT a contrarian buy —
-    // it more often signals continuation. Suppress the bullish points in that context.
     if (strongDowntrend) {
+      // Cleaner metadata tagging for falling knife (score 0, but logged as warning)
       add(
         'RSI Oversold (Downtrend — Caution)',
-        0,  // no bullish points; the add() guard drops 0-point signals, so log a neutral note
-        // Use a tiny negative instead so the signal still appears with a warning label
-        -0.5,
+        0,  
         `RSI < ${rsiOversoldThreshold} but price is in a confirmed downtrend — oversold can persist`,
         [
           { label: 'RSI', value: fmt(rsi, 1) },
@@ -125,7 +162,6 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
         'oscillator'
       );
     } else if (moderateDowntrend) {
-      // Moderate downtrend: halve the contrarian signal
       add(
         'RSI Oversold (Weak Trend)',
         w('rsi_oversold') * 0.5,
@@ -139,7 +175,6 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
         'oscillator'
       );
     } else {
-      // Neutral or uptrend context — full contrarian buy signal
       add(
         'RSI Oversold',
         w('rsi_oversold'),
@@ -158,6 +193,18 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       { label: 'RSI', value: fmt(rsi, 1) },
       { label: 'Zone', value: '45–65 Healthy' },
     ], 'oscillator');
+  }
+
+  // Apply Divergence Signals
+  if (rsiBullishDivergence) {
+     add('RSI Bullish Divergence', w('rsi_oversold') || 1, `Price made lower lows but momentum is stabilizing/rising.`, [
+      { label: 'Pattern', value: 'Bullish Divergence' }
+     ], 'oscillator');
+  }
+  if (rsiBearishDivergence) {
+     add('RSI Bearish Divergence', w('rsi_overbought') || -1, `Price made higher highs but upside momentum is fading.`, [
+      { label: 'Pattern', value: 'Bearish Divergence' }
+     ], 'oscillator');
   }
 
   // Sentiment signals
@@ -361,7 +408,6 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   }
 
   // EDA engineered factors (precomputed in Skill 1 or from edaInsights)
-  const edaFactors = edaInsights?.edaFactors || marketData?.technicalIndicators?.edaFactors || {};
   if (edaFactors.available) {
     if (edaFactors.breakoutSignal === 'BULLISH_BREAKOUT') {
       add('EDA Breakout', w('eda_breakout_bullish') || 0.5, 'Price broke above recent 20-day range.', [
