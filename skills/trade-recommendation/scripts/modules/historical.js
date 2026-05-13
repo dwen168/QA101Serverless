@@ -14,6 +14,8 @@ function computeRollingRSI(closes, period) {
 // Find past setups matching current RSI zone + MA50 position, report next 5/10d returns
 function findHistoricalPatterns(priceHistory, marketData) {
   if (!priceHistory || priceHistory.length < 30) return null;
+  if (marketData.rsi == null || marketData.ma50 == null || marketData.price == null) return null;
+
   const closes = priceHistory.map(d => d.close);
   const curRsiZone = marketData.rsi > 70 ? 'OB' : marketData.rsi < 30 ? 'OS' : 'N';
   const curVsMA50 = marketData.price > marketData.ma50 ? 'ABOVE' : 'BELOW';

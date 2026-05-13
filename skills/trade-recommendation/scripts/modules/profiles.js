@@ -1,5 +1,8 @@
 const { getAllWeights } = require('../../../../backend/lib/weights-loader');
 
+let cachedThresholds = {};
+let cachedRealisticMax = null;
+
 function normalizeTimeHorizon(value = 'MEDIUM') {
   const normalized = String(value || '').trim().toUpperCase();
   return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
@@ -8,15 +11,22 @@ function normalizeTimeHorizon(value = 'MEDIUM') {
 function getActionThresholds(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
   
-  // Calculate dynamic maximum possible score to scale thresholds
-  const weights = getAllWeights();
-  const positiveWeights = Object.values(weights).filter(v => v > 0);
-  const theoreticalMax = positiveWeights.reduce((sum, v) => sum + v, 0);
-  
-  // Realistic max is lower because signals are mutually exclusive (e.g. can't be overbought and oversold)
-  // Assuming realistic max is about 40% of theoretical max. If theoretical max is 20, realistic is 8.
-  const realisticMax = Math.max(10, theoreticalMax * 0.4); 
-  const scale = realisticMax / 10; // 10 is the baseline realistic max we used previously
+  if (cachedThresholds[normalized]) {
+    return cachedThresholds[normalized];
+  }
+
+  if (cachedRealisticMax === null) {
+    // Calculate dynamic maximum possible score to scale thresholds
+    const weights = getAllWeights();
+    const positiveWeights = Object.values(weights).filter(v => v > 0);
+    const theoreticalMax = positiveWeights.reduce((sum, v) => sum + v, 0);
+    
+    // Realistic max is lower because signals are mutually exclusive (e.g. can't be overbought and oversold)
+    // Assuming realistic max is about 40% of theoretical max. If theoretical max is 20, realistic is 8.
+    cachedRealisticMax = Math.max(10, theoreticalMax * 0.4); 
+  }
+
+  const scale = cachedRealisticMax / 10; // 10 is the baseline realistic max we used previously
 
   const baseThresholds = {
     SHORT: { strongBuy: 7, buy: 4, holdLow: -2, holdHigh: 2, sell: -4, strongSell: -7 },
@@ -26,7 +36,7 @@ function getActionThresholds(timeHorizon = 'MEDIUM') {
   
   const thresholds = baseThresholds[normalized];
   
-  return {
+  const result = {
     strongBuy: parseFloat((thresholds.strongBuy * scale).toFixed(1)),
     buy: parseFloat((thresholds.buy * scale).toFixed(1)),
     holdLow: parseFloat((thresholds.holdLow * scale).toFixed(1)),
@@ -34,6 +44,9 @@ function getActionThresholds(timeHorizon = 'MEDIUM') {
     sell: parseFloat((thresholds.sell * scale).toFixed(1)),
     strongSell: parseFloat((thresholds.strongSell * scale).toFixed(1)),
   };
+
+  cachedThresholds[normalized] = result;
+  return result;
 }
 
 function mapActionFromScore(score, timeHorizon = 'MEDIUM') {
@@ -46,78 +59,84 @@ function mapActionFromScore(score, timeHorizon = 'MEDIUM') {
   return { action: 'HOLD', actionColor: '#f59e0b' };
 }
 
+const PROFILES = {
+  SHORT: {
+    timeHorizon: 'SHORT',
+    label: 'Short-term tactical',
+    holdingPeriod: 'Up to 8 weeks',
+    focus: 'Momentum, breakout confirmation, execution timing, and tight risk control.',
+    signalMultipliers: {
+      trend: 1.0,
+      longTrend: 0.6,
+      oscillator: 1.2,
+      sentiment: 0.9,
+      macro: 0.8,
+      analyst: 0.6,
+      valuation: 0.4,
+      fundamental: 0.5,
+      momentum: 1.3,
+      technical: 1.2,
+      intraday: 1.2,
+      eda: 1.2,
+    },
+    atrStopMultiplier: 1.2,
+    atrTargetMultiplier: 2.0,
+    fallbackStopPercent: 0.035,
+    fallbackTargetPercent: 0.07,
+  },
+  MEDIUM: {
+    timeHorizon: 'MEDIUM',
+    label: 'Medium-term balanced',
+    holdingPeriod: 'Several weeks to a few months',
+    focus: 'Balanced mix of trend, momentum, macro, analyst sentiment, and risk-adjusted setup quality.',
+    signalMultipliers: {
+      trend: 1.0,
+      longTrend: 1.0,
+      oscillator: 1.0,
+      sentiment: 1.0,
+      macro: 1.0,
+      analyst: 1.0,
+      valuation: 1.0,
+      fundamental: 1.0,
+      momentum: 1.0,
+      technical: 1.0,
+      intraday: 1.0,
+      eda: 1.0,
+    },
+    atrStopMultiplier: 1.5,
+    atrTargetMultiplier: 2.5,
+    fallbackStopPercent: 0.05,
+    fallbackTargetPercent: 0.125,
+  },
+  LONG: {
+    timeHorizon: 'LONG',
+    label: 'Medium/long-term fundamental',
+    holdingPeriod: 'Multi-month holding period',
+    focus: 'Trend durability, fundamentals, analyst expectations, valuation discipline, and macro regime.',
+    signalMultipliers: {
+      trend: 1.1,
+      longTrend: 1.35,
+      oscillator: 0.7,
+      sentiment: 0.75,
+      macro: 1.15,
+      analyst: 1.25,
+      valuation: 1.35,
+      fundamental: 1.2,
+      momentum: 0.5,
+      technical: 0.6,
+      intraday: 0.3,
+      eda: 0.8,
+    },
+    atrStopMultiplier: 2.0,
+    atrTargetMultiplier: 4.0,
+    fallbackStopPercent: 0.08,
+    fallbackTargetPercent: 0.25,
+  },
+};
+
 function getRecommendationProfile(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
-  const profiles = {
-    SHORT: {
-      timeHorizon: 'SHORT',
-      label: 'Short-term tactical',
-      holdingPeriod: 'Up to 8 weeks',
-      focus: 'Momentum, breakout confirmation, execution timing, and tight risk control.',
-      signalMultipliers: {
-        trend: 1.0,
-        longTrend: 0.6,
-        oscillator: 1.2,
-        sentiment: 0.9,
-        macro: 0.8,
-        analyst: 0.6,
-        valuation: 0.4,
-        fundamental: 0.5,
-        momentum: 1.3,
-        technical: 1.2,
-        intraday: 1.2,
-        eda: 1.2,
-      },
-      atrStopMultiplier: 1.2,
-      atrTargetMultiplier: 2.0,
-    },
-    MEDIUM: {
-      timeHorizon: 'MEDIUM',
-      label: 'Medium-term balanced',
-      holdingPeriod: 'Several weeks to a few months',
-      focus: 'Balanced mix of trend, momentum, macro, analyst sentiment, and risk-adjusted setup quality.',
-      signalMultipliers: {
-        trend: 1.0,
-        longTrend: 1.0,
-        oscillator: 1.0,
-        sentiment: 1.0,
-        macro: 1.0,
-        analyst: 1.0,
-        valuation: 1.0,
-        fundamental: 1.0,
-        momentum: 1.0,
-        technical: 1.0,
-        intraday: 1.0,
-        eda: 1.0,
-      },
-      atrStopMultiplier: 1.5,
-      atrTargetMultiplier: 2.5,
-    },
-    LONG: {
-      timeHorizon: 'LONG',
-      label: 'Medium/long-term fundamental',
-      holdingPeriod: 'Multi-month holding period',
-      focus: 'Trend durability, fundamentals, analyst expectations, valuation discipline, and macro regime.',
-      signalMultipliers: {
-        trend: 1.1,
-        longTrend: 1.35,
-        oscillator: 0.7,
-        sentiment: 0.75,
-        macro: 1.15,
-        analyst: 1.25,
-        valuation: 1.35,
-        fundamental: 1.2,
-        momentum: 0.5,
-        technical: 0.6,
-        intraday: 0.3,
-        eda: 0.8,
-      },
-      atrStopMultiplier: 2.0,
-      atrTargetMultiplier: 4.0,
-    },
-  };
-
-  return profiles[normalized];
+  return PROFILES[normalized];
 }
 
 function adjustSignalPoints(points, multiplier = 1) {

@@ -446,32 +446,38 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
 
   // Analyst consensus signals
   const consensus = marketData.analystConsensus;
-  const totalRatings = consensus.strongBuy + consensus.buy + consensus.hold + consensus.sell + consensus.strongSell;
-  const buyRatio = totalRatings === 0 ? 0 : (consensus.strongBuy + consensus.buy) / totalRatings;
+  let buyRatio = 0;
 
-  if (buyRatio > 0.6) {
-    add('Strong Analyst Buy', w('analyst_buy_strong'), `Majority of analysts rate Buy or Strong Buy`, [
-      { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
-      { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
-    ], 'analyst');
-  } else if (buyRatio < 0.3) {
-    add('Weak Analyst Support', w('analyst_buy_weak'), `Few analysts rate Buy`, [
-      { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
-      { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
-    ], 'analyst');
-  }
+  if (consensus) {
+    const totalRatings = (consensus.strongBuy || 0) + (consensus.buy || 0) + (consensus.hold || 0) + (consensus.sell || 0) + (consensus.strongSell || 0);
+    buyRatio = totalRatings === 0 ? 0 : ((consensus.strongBuy || 0) + (consensus.buy || 0)) / totalRatings;
 
-  if (consensus.upside > 10) {
-    add('Analyst Upside', w('analyst_upside'), `Analyst targets above current price`, [
-      { label: 'Upside', value: `+${fmt(consensus.upside, 1)}%` },
-      { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
-      { label: 'Range', value: `$${fmt(consensus.targetLow)}–$${fmt(consensus.targetHigh)}` },
-    ], 'analyst');
-  } else if (consensus.upside < -5) {
-    add('Downside Risk', w('analyst_downside'), `Analyst targets below current price`, [
-      { label: 'Downside', value: `${fmt(consensus.upside, 1)}%` },
-      { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
-    ], 'analyst');
+    if (totalRatings > 0) {
+      if (buyRatio > 0.6) {
+        add('Strong Analyst Buy', w('analyst_buy_strong'), `Majority of analysts rate Buy or Strong Buy`, [
+          { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
+          { label: 'Ratings', value: `${(consensus.strongBuy || 0) + (consensus.buy || 0)}B / ${consensus.hold || 0}H / ${(consensus.sell || 0) + (consensus.strongSell || 0)}S` },
+        ], 'analyst');
+      } else if (buyRatio < 0.3) {
+        add('Weak Analyst Support', w('analyst_buy_weak'), `Few analysts rate Buy`, [
+          { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
+          { label: 'Ratings', value: `${(consensus.strongBuy || 0) + (consensus.buy || 0)}B / ${consensus.hold || 0}H / ${(consensus.sell || 0) + (consensus.strongSell || 0)}S` },
+        ], 'analyst');
+      }
+    }
+
+    if (consensus.upside > 10) {
+      add('Analyst Upside', w('analyst_upside'), `Analyst targets above current price`, [
+        { label: 'Upside', value: `+${fmt(consensus.upside, 1)}%` },
+        { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
+        { label: 'Range', value: `$${fmt(consensus.targetLow)}–$${fmt(consensus.targetHigh)}` },
+      ], 'analyst');
+    } else if (consensus.upside < -5) {
+      add('Downside Risk', w('analyst_downside'), `Analyst targets below current price`, [
+        { label: 'Downside', value: `${fmt(consensus.upside, 1)}%` },
+        { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
+      ], 'analyst');
+    }
   }
 
   const pe = Number(marketData.pe || 0);

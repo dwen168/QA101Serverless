@@ -4,6 +4,13 @@ function normalizeText(value) {
   return String(value || '').toLowerCase().trim();
 }
 
+function matchesKeyword(corpus, keyword) {
+  const kw = normalizeText(keyword);
+  if (!kw) return false;
+  const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(corpus);
+}
+
 function canonicalizeSector(sector) {
   const raw = String(sector || 'Unknown').trim();
   const lower = raw.toLowerCase();
@@ -43,7 +50,7 @@ function detectActiveEventRegimes(macroContext) {
       const triggerThemes = Array.isArray(regime?.triggerThemes) ? regime.triggerThemes : [];
       const keywords = Array.isArray(regime?.keywords) ? regime.keywords : [];
       const themeMatches = triggerThemes.filter((theme) => dominantThemes.includes(String(theme).toUpperCase()));
-      const keywordMatches = keywords.filter((keyword) => corpus.includes(normalizeText(keyword)));
+      const keywordMatches = keywords.filter((keyword) => matchesKeyword(corpus, keyword));
 
       if (themeMatches.length === 0 && keywordMatches.length === 0) {
         return null;
@@ -61,6 +68,7 @@ function detectActiveEventRegimes(macroContext) {
         intensity: Number(regime.intensity || 1),
         beneficiarySectors: Array.isArray(regime.beneficiarySectors) ? regime.beneficiarySectors : [],
         headwindSectors: Array.isArray(regime.headwindSectors) ? regime.headwindSectors : [],
+        keywords: Array.isArray(regime.keywords) ? regime.keywords : [],
         businessKeywords: Array.isArray(regime.businessKeywords) ? regime.businessKeywords : [],
         themeMatches,
         keywordMatches: keywordMatches.slice(0, 3),
@@ -118,7 +126,7 @@ function buildEventRegimeOverlay(marketData) {
       ...(Array.isArray(regime.keywords) ? regime.keywords : []),
     ];
     const companyKeywordMatches = companyCorpus
-      ? bizKeywords.filter((kw) => companyCorpus.includes(normalizeText(kw)))
+      ? bizKeywords.filter((kw) => matchesKeyword(companyCorpus, kw))
       : [];
     const companyDirectMatch = companyKeywordMatches.length >= 1;
 

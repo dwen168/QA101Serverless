@@ -13,6 +13,8 @@ const fs = require('fs');
 const path = require('path');
 
 let weightsData = null;
+let cachedAllWeights = null;
+let cachedRecommendedScale = null;
 
 function loadWeights() {
   if (weightsData) return weightsData;
@@ -106,6 +108,8 @@ function getSignalWeight(signalKey) {
 }
 
 function getAllWeights() {
+  if (cachedAllWeights) return cachedAllWeights;
+
   const weights = loadWeights();
   const result = {};
   
@@ -113,6 +117,7 @@ function getAllWeights() {
     result[key] = typeof val === 'object' ? val.points : val;
   }
   
+  cachedAllWeights = result;
   return result;
 }
 
@@ -126,9 +131,31 @@ function getWeightsMetadata() {
   };
 }
 
+/**
+ * Calculates a recommended score scale (divisor) based on current weights.
+ * Sums the top 8 positive weights to estimate a "high conviction" score.
+ */
+function getRecommendedScoreScale() {
+  if (cachedRecommendedScale) return cachedRecommendedScale;
+
+  const weights = getAllWeights();
+  const positiveWeights = Object.values(weights).filter((w) => w > 0);
+  if (positiveWeights.length === 0) {
+    cachedRecommendedScale = 10;
+    return 10;
+  }
+  
+  const sorted = positiveWeights.sort((a, b) => b - a);
+  const sumTop = sorted.slice(0, 8).reduce((a, b) => a + b, 0);
+  // Ensure we don't return something too small or too large
+  cachedRecommendedScale = Math.max(5, Math.min(25, Math.round(sumTop)));
+  return cachedRecommendedScale;
+}
+
 module.exports = {
   loadWeights,
   getSignalWeight,
   getAllWeights,
   getWeightsMetadata,
+  getRecommendedScoreScale,
 };

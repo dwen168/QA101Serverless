@@ -35,7 +35,7 @@ function buildFallbackRecommendation(marketData, action, signals, confidence, bu
   }
 
   return {
-    rationale: `${profile.label} view: ${marketData.ticker} currently shows a ${marketData.trend} setup, and this recommendation emphasizes ${profile.focus.toLowerCase()} Analyst support stands at ${(buyRatio * 100).toFixed(0)}% buy ratings. ${macroSentence}`,
+    rationale: `${profile.label} view: ${marketData.ticker} currently shows a ${marketData.trend} setup, and this recommendation emphasizes ${profile.focus.toLowerCase()}. Analyst support stands at ${(buyRatio * 100).toFixed(0)}% buy ratings. ${macroSentence}`,
     timeHorizon: profile.timeHorizon,
     keyRisks: keyRisks.slice(0, 3),
     executiveSummary: `${marketData.ticker} - ${action} for a ${profile.label.toLowerCase()} plan with ${confidence}% confidence.`,
@@ -191,16 +191,6 @@ Context:
   };
 }
 
-module.exports = {
-  normalizeTimeHorizon,
-  getRecommendationProfile,
-  mapAction,
-  runTradeRecommendation,
-  computeBacktestDecision: undefined,
-  runRecommendationBacktest,
-  scoreSignals,
-};
-
 // Compute a backtest-only decision (price + technicals only) for the latest bar
 function computeBacktestDecision({ priceHistory, timeHorizon = 'MEDIUM' } = {}) {
   if (!Array.isArray(priceHistory) || priceHistory.length === 0) {
@@ -212,5 +202,12 @@ function computeBacktestDecision({ priceHistory, timeHorizon = 'MEDIUM' } = {}) 
   return { score, action };
 }
 
-// attach to exports
-module.exports.computeBacktestDecision = computeBacktestDecision;
+module.exports = {
+  normalizeTimeHorizon,
+  getRecommendationProfile,
+  mapAction,
+  runTradeRecommendation,
+  computeBacktestDecision,
+  runRecommendationBacktest,
+  scoreSignals,
+};

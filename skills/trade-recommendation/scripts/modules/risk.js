@@ -17,8 +17,10 @@ function computeRiskMetrics(marketData, profile) {
   const entry = marketData.price;
   let atr = null;
   let varMetrics = null;
-  let stopLoss = entry * 0.95;  // Default 5% fallback
-  let takeProfit = entry * 1.10; // Default 10% fallback
+  
+  // Use profile-aware defaults if price history is unavailable
+  let stopLoss = entry * (1 - (profile.fallbackStopPercent || 0.05));
+  let takeProfit = entry * (1 + (profile.fallbackTargetPercent || 0.10));
 
   if (marketData.priceHistory && marketData.priceHistory.length >= 15) {
     atr = calculateATR(marketData.priceHistory, 14);

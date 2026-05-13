@@ -1,3 +1,5 @@
+const { getRecommendedScoreScale } = require('../../../../backend/lib/weights-loader');
+
 const CONFIDENCE_CONFIG = {
   BASE_SCORE: 42,
   TANH_MULTIPLIER: 34,
@@ -18,7 +20,8 @@ const CONFIDENCE_CONFIG = {
 
 function computeConfidence(score, signals = [], macroRisk = 'MEDIUM') {
   const absScore = Math.abs(Number(score) || 0);
-  const normalizedScore = Math.min(1, absScore / 10);
+  const divisor = getRecommendedScoreScale();
+  const normalizedScore = Math.min(1, absScore / divisor);
 
   // Saturate slowly so mid scores do not jump to very high confidence.
   const baseConfidence = CONFIDENCE_CONFIG.BASE_SCORE + Math.round(CONFIDENCE_CONFIG.TANH_MULTIPLIER * Math.tanh(normalizedScore * CONFIDENCE_CONFIG.TANH_SCALAR));
@@ -91,7 +94,7 @@ async function generateConfidenceExplanation({ llm, ticker, action, confidence, 
     const systemPrompt = 'You are a quantitative analyst. Write a single concise sentence (under 100 characters) explaining confidence. No markdown.';
     const userMessage = `Ticker=${ticker}; Action=${action}; Confidence=${confidence}; Alignment=${confidenceBreakdown?.alignment}; Positive=${confidenceBreakdown?.positiveMagnitude}; Negative=${confidenceBreakdown?.negativeMagnitude}; MacroAdj=${confidenceBreakdown?.macroAdjustment}; Conflict=${confidenceBreakdown?.conflictPenalty}; SignalCount=${signals.length}.`;
     const text = await llm(systemPrompt, userMessage);
-    const cleaned = String(text || '').replace(/\\s+/g, ' ').replace(/\`\`\`/g, '').trim();
+    const cleaned = String(text || '').replace(/\s+/g, ' ').replace(/\`\`\`/g, '').trim();
     return cleaned || fallback;
   } catch (error) {
     console.warn(`[Trade Recommendation] Failed to generate confidence explanation for ${ticker}:`, error.message);
