@@ -28,10 +28,13 @@ function computeRiskMetrics(marketData, profile) {
       stopLoss = parseFloat((entry - atr * profile.atrStopMultiplier).toFixed(2));
       takeProfit = parseFloat((entry + atr * profile.atrTargetMultiplier).toFixed(2));
     } else {
-      const dailyVol = computeHistoricalVolatility(marketData.priceHistory, 14) || 0.02; // fallback to 2% daily if calc fails
-      const fallbackAtrApprox = entry * dailyVol;
-      stopLoss = parseFloat((entry - fallbackAtrApprox * profile.atrStopMultiplier).toFixed(2));
-      takeProfit = parseFloat((entry + fallbackAtrApprox * profile.atrTargetMultiplier).toFixed(2));
+      const dailyVol = computeHistoricalVolatility(marketData.priceHistory, 14);
+      if (dailyVol && dailyVol > 0.001) {
+        const fallbackAtrApprox = entry * dailyVol;
+        stopLoss = parseFloat((entry - fallbackAtrApprox * profile.atrStopMultiplier).toFixed(2));
+        takeProfit = parseFloat((entry + fallbackAtrApprox * profile.atrTargetMultiplier).toFixed(2));
+      }
+      // If dailyVol is not available or too low, stopLoss and takeProfit remain as the profile-aware defaults
     }
     
     // Calculate Value at Risk (95% confidence)

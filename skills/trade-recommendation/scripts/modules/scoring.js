@@ -17,9 +17,9 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   };
 
   // detail: { label, value } pairs shown as chips in the UI
-  const add = (name, points, reason, detail = null, bucket = 'trend') => {
+  const add = (name, points, reason, detail = null, bucket = 'trend', force = false) => {
     const adjustedPoints = adjustSignalPoints(points, profile.signalMultipliers[bucket] || 1);
-    if (adjustedPoints === 0) return;
+    if (adjustedPoints === 0 && !force) return;
     signals.push({ name, points: adjustedPoints, reason, detail, bucket });
     score += adjustedPoints;
   };
@@ -163,7 +163,8 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
           { label: 'Threshold', value: `${rsiOversoldThreshold}` },
           { label: 'Warning', value: 'Downtrend intact — avoid catching falling knife' },
         ],
-        'oscillator'
+        'oscillator',
+        true
       );
     } else if (moderateDowntrend) {
       add(
@@ -201,12 +202,12 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
 
   // Apply Divergence Signals
   if (rsiBullishDivergence) {
-     add('RSI Bullish Divergence', w('rsi_oversold') || 1, `Price made lower lows but momentum is stabilizing/rising.`, [
+     add('RSI Bullish Divergence', w('rsi_oversold'), `Price made lower lows but momentum is stabilizing/rising.`, [
       { label: 'Pattern', value: 'Bullish Divergence' }
      ], 'oscillator');
   }
   if (rsiBearishDivergence) {
-     add('RSI Bearish Divergence', w('rsi_overbought') || -1, `Price made higher highs but upside momentum is fading.`, [
+     add('RSI Bearish Divergence', w('rsi_overbought'), `Price made higher highs but upside momentum is fading.`, [
       { label: 'Pattern', value: 'Bearish Divergence' }
      ], 'oscillator');
   }
@@ -358,17 +359,24 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
 
     // Technology / Real Estate are sensitive to rates
     if (['Technology', 'Real Estate'].includes(sector) && tnx) {
-      if (tnx.trend === 'BULLISH' && tnx.changePercent > 10) {
+      const tnxLevel = tnx.price || tnx.close || 0;
+      // If TNX is > 4.0%, a 10% change is material. If it's lower, we require a larger relative spike.
+      const requiresBiggerSpike = tnxLevel > 0 && tnxLevel < 4.0;
+      const threshold = requiresBiggerSpike ? 15 : 10;
+      
+      if (tnx.trend === 'BULLISH' && tnx.changePercent > threshold) {
         add('Macro Anchor: Rising Yields', macroWeight('macro_sector_headwind', -1), '10Y Treasury yields are rising strongly, a headwind for growth and duration-sensitive sectors.', [
           { label: '^TNX', value: `+${fmt(tnx.changePercent)}%` }
         ], 'macro');
       }
     }
 
-    // VIX as a global risk-off signal (VIX spiking > 10% over the period)
+    // VIX as a global risk-off signal
     if (vix && vix.trend === 'BULLISH' && vix.changePercent > 10) {
-      if (!['Utilities', 'Consumer Defensive'].includes(sector)) {
-        add('Macro Anchor: Volatility Spiking', macroWeight('macro_risk_bearish', -1.5), 'VIX has spiked > 10%, indicating elevated systemic market stress and broader risk-off flows.', [
+      const vixLevel = vix.price || vix.close || 0;
+      // Require VIX to be above 20, OR the spike to be very large (>25%) if VIX is low
+      if ((vixLevel >= 20 || vix.changePercent > 25 || vixLevel === 0) && !['Utilities', 'Consumer Defensive'].includes(sector)) {
+        add('Macro Anchor: Volatility Spiking', macroWeight('macro_risk_bearish', -1.5), 'VIX has spiked significantly, indicating elevated systemic market stress and broader risk-off flows.', [
           { label: '^VIX', value: `+${fmt(vix.changePercent)}%` }
         ], 'macro');
       }

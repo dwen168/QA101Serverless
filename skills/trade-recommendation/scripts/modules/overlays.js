@@ -8,7 +8,9 @@ function matchesKeyword(corpus, keyword) {
   const kw = normalizeText(keyword);
   if (!kw) return false;
   const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\b${escaped}\\b`, 'i').test(corpus);
+  const startBoundary = /(^\w)/.test(kw) ? '\\b' : '(?<=\\s|^)';
+  const endBoundary = /(\w$)/.test(kw) ? '\\b' : '(?=\\s|$)';
+  return new RegExp(`${startBoundary}${escaped}${endBoundary}`, 'i').test(corpus);
 }
 
 function canonicalizeSector(sector) {
