@@ -34,32 +34,36 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   const pctVsMa200 = ma200 ? ((p - ma200) / ma200 * 100) : 0;
 
   // Trend signals
-  if (p > ma50) {
-    add('Price > MA50', w('trend_ma50_bullish'), 'Bullish trend confirmation', [
-      { label: 'Price', value: `$${fmt(p)}` },
-      { label: 'MA50', value: `$${fmt(ma50)}` },
-      { label: 'Gap', value: `+${fmt(pctVsMa50, 1)}%` },
-    ], 'trend');
-  } else {
-    add('Price < MA50', w('trend_ma50_bearish'), 'Bearish trend - price below medium-term average', [
-      { label: 'Price', value: `$${fmt(p)}` },
-      { label: 'MA50', value: `$${fmt(ma50)}` },
-      { label: 'Gap', value: `${fmt(pctVsMa50, 1)}%` },
-    ], 'trend');
+  if (ma50 != null) {
+    if (p > ma50) {
+      add('Price > MA50', w('trend_ma50_bullish'), 'Bullish trend confirmation', [
+        { label: 'Price', value: `$${fmt(p)}` },
+        { label: 'MA50', value: `$${fmt(ma50)}` },
+        { label: 'Gap', value: `+${fmt(pctVsMa50, 1)}%` },
+      ], 'trend');
+    } else {
+      add('Price < MA50', w('trend_ma50_bearish'), 'Bearish trend - price below medium-term average', [
+        { label: 'Price', value: `$${fmt(p)}` },
+        { label: 'MA50', value: `$${fmt(ma50)}` },
+        { label: 'Gap', value: `${fmt(pctVsMa50, 1)}%` },
+      ], 'trend');
+    }
   }
 
-  if (p > ma200) {
-    add('Price > MA200', w('trend_ma200_bullish'), 'Long-term uptrend intact', [
-      { label: 'Price', value: `$${fmt(p)}` },
-      { label: 'MA200', value: `$${fmt(ma200)}` },
-      { label: 'Gap', value: `+${fmt(pctVsMa200, 1)}%` },
-    ], 'longTrend');
-  } else {
-    add('Price < MA200', w('trend_ma200_bearish'), 'Long-term downtrend', [
-      { label: 'Price', value: `$${fmt(p)}` },
-      { label: 'MA200', value: `$${fmt(ma200)}` },
-      { label: 'Gap', value: `${fmt(pctVsMa200, 1)}%` },
-    ], 'longTrend');
+  if (ma200 != null) {
+    if (p > ma200) {
+      add('Price > MA200', w('trend_ma200_bullish'), 'Long-term uptrend intact', [
+        { label: 'Price', value: `$${fmt(p)}` },
+        { label: 'MA200', value: `$${fmt(ma200)}` },
+        { label: 'Gap', value: `+${fmt(pctVsMa200, 1)}%` },
+      ], 'longTrend');
+    } else {
+      add('Price < MA200', w('trend_ma200_bearish'), 'Long-term downtrend', [
+        { label: 'Price', value: `$${fmt(p)}` },
+        { label: 'MA200', value: `$${fmt(ma200)}` },
+        { label: 'Gap', value: `${fmt(pctVsMa200, 1)}%` },
+      ], 'longTrend');
+    }
   }
 
   // ── Trend-context helpers for RSI adaptive thresholds (improvement 3 & 4) ──
