@@ -7,7 +7,7 @@ function computeRollingRSI(closes, period) {
     const diff = slice[i] - slice[i - 1];
     if (diff > 0) gains += diff; else losses -= diff;
   }
-  const rs = losses === 0 ? 100 : (gains / period) / (losses / period);
+  const rs = losses === 0 ? (gains === 0 ? 1 : Infinity) : (gains / period) / (losses / period);
   return parseFloat((100 - 100 / (1 + rs)).toFixed(1));
 }
 

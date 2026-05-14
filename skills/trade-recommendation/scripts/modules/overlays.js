@@ -189,8 +189,11 @@ function buildEventRegimeOverlay(marketData) {
 
 function classifyRateSensitivity(sector) {
   const normalized = canonicalizeSector(sector || 'Unknown');
-  if (['Technology', 'Semiconductors', 'Consumer Discretionary', 'Utilities', 'Healthcare'].includes(normalized)) {
+  if (['Technology', 'Semiconductors', 'Consumer Discretionary', 'Healthcare'].includes(normalized)) {
     return 'GROWTH';
+  }
+  if (['Utilities', 'Real Estate', 'Consumer Staples'].includes(normalized)) {
+    return 'DEFENSIVE';
   }
   if (normalized === 'Financials') {
     return 'FINANCIALS';
@@ -206,6 +209,7 @@ function computePolicyDirectionalImpact(bank, bias, sector) {
   if (bias === 'HOLD' || bias === 'WATCH') return 0;
 
   if (sensitivity === 'GROWTH') return bias === 'EASING' ? 1 : -1;
+  if (sensitivity === 'DEFENSIVE') return bias === 'EASING' ? 0.8 : -0.8;
   if (sensitivity === 'FINANCIALS') return bias === 'EASING' ? -0.5 : 0.5;
   if (sensitivity === 'CYCLICAL') return bias === 'EASING' ? 0.4 : -0.4;
   return bias === 'EASING' ? 0.25 : -0.25;

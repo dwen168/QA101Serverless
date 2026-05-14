@@ -109,8 +109,8 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     if (recentMinPrice < olderMinPrice && rsi > 40 && p > recentMinPrice * 1.02) {
       rsiBullishDivergence = true;
     }
-    // Bearish Divergence Proxy: Price made a higher high recently, but current RSI is relatively weak (<60)
-    if (recentMaxPrice > olderMaxPrice && rsi < 60 && p < recentMaxPrice * 0.98) {
+    // Bearish Divergence Proxy: Price made a higher high recently, but current RSI is relatively weak (<50)
+    if (recentMaxPrice > olderMaxPrice && rsi < 50 && p < recentMaxPrice * 0.98) {
       rsiBearishDivergence = true;
     }
   }
@@ -516,6 +516,10 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       add('Rich Valuation', -1, 'Valuation is rich and leaves less margin of safety if growth expectations fade.', [
         { label: 'P/E', value: fmt(pe, 1) },
       ], 'valuation');
+    } else {
+      add('Fair Valuation', 0, 'Valuation is fair and reflects balanced growth expectations.', [
+        { label: 'P/E', value: fmt(pe, 1) },
+      ], 'valuation', true);
     }
   }
 
