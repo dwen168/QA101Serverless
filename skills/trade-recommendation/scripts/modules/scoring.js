@@ -1,6 +1,6 @@
 const { getSignalWeight } = require('../../../../backend/lib/weights-loader');
 const { getRecommendationProfile, adjustSignalPoints } = require('./profiles');
-const { buildEventRegimeOverlay, buildPolicyOverlay } = require('./overlays');
+const { buildEventRegimeOverlay, buildPolicyOverlay, canonicalizeSector } = require('./overlays');
 const { calculateAllIndicators } = require('../../../../backend/lib/technical-indicators');
 
 function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
@@ -13,7 +13,7 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
 
   const macroWeight = (key, fallback) => {
     const value = getSignalWeight(key);
-    return value === 0 ? fallback : value;
+    return value === undefined || value === null ? fallback : value;
   };
 
   // detail: { label, value } pairs shown as chips in the UI
@@ -276,7 +276,7 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       ], 'macro');
     }
 
-    const sector = String(marketData.sector || 'Unknown');
+    const sector = canonicalizeSector(marketData.sector || 'Unknown');
     // Themes that HURT a sector in a HIGH-risk macro environment
     const sectorHeadwindThemes = {
       Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
@@ -342,7 +342,7 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     const oil = getAnchor('CL=F');
     const vix = getAnchor('^VIX');
     const tnx = getAnchor('^TNX');
-    const sector = String(marketData.sector || 'Unknown');
+    const sector = canonicalizeSector(marketData.sector || 'Unknown');
 
     // Energy requires oil confirmation
     if (sector === 'Energy' && oil) {
@@ -461,8 +461,8 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   let buyRatio = 0;
 
   if (consensus) {
-    const totalRatings = (consensus.strongBuy || 0) + (consensus.buy || 0) + (consensus.hold || 0) + (consensus.sell || 0) + (consensus.strongSell || 0);
-    buyRatio = totalRatings === 0 ? 0 : ((consensus.strongBuy || 0) + (consensus.buy || 0)) / totalRatings;
+    const totalRatings = Number(consensus.strongBuy || 0) + Number(consensus.buy || 0) + Number(consensus.hold || 0) + Number(consensus.sell || 0) + Number(consensus.strongSell || 0);
+    buyRatio = totalRatings === 0 ? 0 : (Number(consensus.strongBuy || 0) + Number(consensus.buy || 0)) / totalRatings;
 
     if (totalRatings > 0) {
       if (buyRatio > 0.6) {
@@ -695,9 +695,10 @@ function _rsiFromCloses(closes, period) {
     if (diff > 0) gains += diff;
     else losses += Math.abs(diff);
   }
+  if (losses === 0) return gains === 0 ? 50 : 100;
   gains /= period;
   losses /= period;
-  return 100 - 100 / (1 + gains / (losses + 1e-9));
+  return 100 - 100 / (1 + gains / losses);
 }
 
 /**

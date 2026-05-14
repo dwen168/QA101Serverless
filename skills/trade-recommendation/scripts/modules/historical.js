@@ -25,9 +25,9 @@ function findHistoricalPatterns(priceHistory, marketData) {
   for (let i = 20; i <= closes.length - LOOKAHEAD - 1; i++) {
     const slice = closes.slice(0, i + 1);
     const rsi = computeRollingRSI(slice, 14);
-    if (rsi === null) continue;
+    if (rsi === null || slice.length < 50) continue;
     const ma50Slice = slice.slice(-50);
-    const ma50 = ma50Slice.reduce((s, v) => s + v, 0) / ma50Slice.length;
+    const ma50 = ma50Slice.reduce((s, v) => s + v, 0) / 50;
     const histPrice = slice[slice.length - 1];
     const histRsiZone = rsi > 70 ? 'OB' : rsi < 30 ? 'OS' : 'N';
     const histVsMA50 = histPrice > ma50 ? 'ABOVE' : 'BELOW';

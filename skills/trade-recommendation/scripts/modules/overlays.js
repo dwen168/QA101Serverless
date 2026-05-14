@@ -192,7 +192,7 @@ function classifyRateSensitivity(sector) {
   if (['Technology', 'Semiconductors', 'Consumer Discretionary', 'Healthcare'].includes(normalized)) {
     return 'GROWTH';
   }
-  if (['Utilities', 'Real Estate', 'Consumer Staples'].includes(normalized)) {
+  if (['Utilities', 'Real Estate', 'Consumer Staples', 'Consumer Defensive'].includes(normalized)) {
     return 'DEFENSIVE';
   }
   if (normalized === 'Financials') {
