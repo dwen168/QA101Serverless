@@ -129,71 +129,63 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     return;
   }
 
-  // ── SKILLS 2 & 3 (Parallel) ──
+  // ── SKILLS 2 & 3 (Serial) ──
   setPillState(2, 'active');
-  setPillState(3, 'active');
-  const l23 = addLoadingMsg('⟳ Running visual EDA and recommendation engines...');
+  const l2 = addLoadingMsg('⟳ Running visual EDA...');
 
   let charts, edaInsights, rec;
 
-  const skill2Promise = (async () => {
-    const skillStartedAt = performance.now();
+  // Run EDA first
+  const skillStartedAt2 = performance.now();
+  try {
+    const r2 = await apiFetch(`${API_BASE}/skills/eda-visual-analysis`, {
+      method: 'POST', headers: getLlmHeaders(),
+      body: JSON.stringify({ marketData }),
+    });
+    const d2 = await readApiJson(r2);
+    charts = d2.charts;
+    edaInsights = d2.edaInsights;
+    setPillState(2, 'done');
+    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found (${formatDurationMs(performance.now() - skillStartedAt2)})`, { cls: 's2', label: '② eda-visual-analysis' });
+    renderEDA(charts, edaInsights, marketData, panel);
+  } catch (err) {
+    if (isAbortError(err)) return;
+    setPillState(2, '');
+    addMessage('bot', String(err?.message || 'EDA analysis failed.'));
+  }
+  removeLoadingMsg();
+
+  // Run Recommendation second, now with edaInsights
+  setPillState(3, 'active');
+  const l3 = addLoadingMsg('⟳ Running recommendation engine...');
+  const skillStartedAt3 = performance.now();
+  try {
+    const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
+      method: 'POST', headers: getLlmHeaders(),
+      body: JSON.stringify({ marketData, edaInsights, timeHorizon }),
+    });
+    const d3 = await readApiJson(r3);
+    rec = d3.recommendation;
+    
+    // Fetch backtest-style decision
     try {
-      const r2 = await apiFetch(`${API_BASE}/skills/eda-visual-analysis`, {
-        method: 'POST', headers: getLlmHeaders(),
-        body: JSON.stringify({ marketData }),
+      const rbt = await apiFetch(`${API_BASE}/skills/trade-recommendation/backtest-action`, {
+        method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ priceHistory: marketData.priceHistory, timeHorizon }),
       });
-      const d2 = await readApiJson(r2);
-      charts = d2.charts;
-      edaInsights = d2.edaInsights;
-      setPillState(2, 'done');
-      addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's2', label: '② eda-visual-analysis' });
-      renderEDA(charts, edaInsights, marketData, panel);
-      return d2;
-    } catch (err) {
-      if (isAbortError(err)) return null;
-      setPillState(2, '');
-      addMessage('bot', String(err?.message || 'EDA analysis failed.'));
-      return null;
-    }
-  })();
+      const dbt = await readApiJson(rbt);
+      if (rbt.ok && !dbt.error) {
+        rec.backtestView = dbt;
+      }
+    } catch (e) { /* ignore */ }
 
-  const skill3Promise = (async () => {
-    const skillStartedAt = performance.now();
-    try {
-      // Note: passing null for edaInsights here as it's running in parallel.
-      // The backend now uses precomputed edaFactors from marketData.technicalIndicators.
-      const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
-        method: 'POST', headers: getLlmHeaders(),
-        body: JSON.stringify({ marketData, edaInsights: null, timeHorizon }),
-      });
-      const d3 = await readApiJson(r3);
-      rec = d3.recommendation;
-      
-      // Fetch backtest-style decision
-      try {
-        const rbt = await apiFetch(`${API_BASE}/skills/trade-recommendation/backtest-action`, {
-          method: 'POST', headers: getLlmHeaders(), body: JSON.stringify({ priceHistory: marketData.priceHistory, timeHorizon }),
-        });
-        const dbt = await readApiJson(rbt);
-        if (rbt.ok && !dbt.error) {
-          rec.backtestView = dbt;
-        }
-      } catch (e) { /* ignore */ }
-
-      setPillState(3, 'done');
-      addMessage('bot', `✓ ${rec.action} — ${rec.confidence}% confidence (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's3', label: '③ trade-recommendation' });
-      renderRecommendation(rec, panel);
-      return d3;
-    } catch (err) {
-      if (isAbortError(err)) return null;
-      setPillState(3, '');
-      addMessage('bot', `Recommendation engine failed.`);
-      return null;
-    }
-  })();
-
-  await Promise.all([skill2Promise, skill3Promise]);
+    setPillState(3, 'done');
+    addMessage('bot', `✓ ${rec.action} — ${rec.confidence}% confidence (${formatDurationMs(performance.now() - skillStartedAt3)})`, { cls: 's3', label: '③ trade-recommendation' });
+    renderRecommendation(rec, panel);
+  } catch (err) {
+    if (isAbortError(err)) return;
+    setPillState(3, '');
+    addMessage('bot', `Recommendation engine failed.`);
+  }
   removeLoadingMsg();
 
   // Save snapshot for rehydration
