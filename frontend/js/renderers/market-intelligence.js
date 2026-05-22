@@ -265,6 +265,7 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   // Intel grid
   const grid = document.createElement('div');
   grid.className = 'intel-grid fade-in';
+  grid.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px';
   grid.innerHTML = `
     <div class="intel-card">
       <div class="intel-label">Trend</div>
