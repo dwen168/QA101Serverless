@@ -390,7 +390,10 @@ function createApp() {
 
   app.post('/api/skills/market-intelligence', async (req, res) => {
     try {
-      const result = await runMarketIntelligence({ ticker: req.body.ticker });
+      const result = await runMarketIntelligence({ 
+        ticker: req.body.ticker,
+        mode: req.body.mode
+      });
       res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
@@ -454,6 +457,7 @@ function createApp() {
         tickers: req.body.tickers,
         useMarketData: req.body.useMarketData,
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
+        mode: req.body.mode,
       });
       res.json(sanitizeResponsePayload(result));
     } catch (error) {

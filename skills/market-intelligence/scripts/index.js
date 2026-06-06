@@ -19,27 +19,30 @@ function buildFallbackAnalysis(ticker, marketData) {
   };
 }
 
-async function runMarketIntelligence({ ticker }, dependencies = {}) {
+async function runMarketIntelligence({ ticker, mode }, dependencies = {}) {
   const cleanTicker = normalizeTicker(ticker);
   const isInternational = cleanTicker.includes('.');
   let marketData;
-  try {
-    if (isInternational) {
-      marketData = await fetchYahooFinanceData(cleanTicker, dependencies);
-    } else {
-      try {
-        marketData = await fetchFinnhubMarketData(cleanTicker, dependencies);
-      } catch {
-        marketData = await fetchAlphaVantageMarketData(cleanTicker, dependencies);
-      }
-    }
-  } catch (error) {
+  if (mode === 'mock') {
     marketData = generateMockMarketData(cleanTicker);
-    marketData.fallbackReason = error && error.message ? error.message : 'Live market API failed';
+  } else {
+    try {
+      if (isInternational) {
+        marketData = await fetchYahooFinanceData(cleanTicker, dependencies);
+      } else {
+        try {
+          marketData = await fetchFinnhubMarketData(cleanTicker, dependencies);
+        } catch (err) {
+          marketData = await fetchAlphaVantageMarketData(cleanTicker, dependencies);
+        }
+      }
+    } catch (error) {
+      throw new Error(`Live market data fetch failed for ${cleanTicker}: ${error.message}`);
+    }
   }
   
   if (marketData && !marketData.macroAnchors) {
-    marketData.macroAnchors = await fetchMacroAnchors();
+    marketData.macroAnchors = await fetchMacroAnchors(mode);
   }
 
   return {

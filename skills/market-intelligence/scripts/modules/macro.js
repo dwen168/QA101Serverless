@@ -43,7 +43,7 @@ const SECTOR_THEME_HINTS = {
 };
 
 function detectMacroTheme(text) {
-  const lower = String(text || '').toLowerCase();
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
   if (detectFedRbaPolicyMention(lower)) {
     return 'MONETARY_POLICY';
   }
@@ -56,12 +56,12 @@ function detectMacroTheme(text) {
 }
 
 function detectFedRbaPolicyMention(text) {
-  const lower = String(text || '').toLowerCase();
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
   if (!lower) return false;
 
   const centralBankMentioned = [
     'fed', 'federal reserve', 'fomc', 'powell',
-    'rba', 'reserve bank of australia', 'governor bullock', 'bullock',
+    'rba', 'reserve bank of australia', 'governor bullock', 'michele bullock',
   ].some((keyword) => lower.includes(keyword));
 
   if (!centralBankMentioned) return false;
@@ -70,7 +70,7 @@ function detectFedRbaPolicyMention(text) {
 }
 
 function detectRateDecisionMention(text) {
-  const lower = String(text || '').toLowerCase();
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
   if (!lower) return false;
 
   return [
@@ -85,28 +85,34 @@ function detectRateDecisionMention(text) {
 }
 
 function detectFedMention(text) {
-  const lower = String(text || '').toLowerCase();
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
   return ['fed', 'federal reserve', 'fomc', 'powell'].some((keyword) => lower.includes(keyword));
 }
 
 function detectRbaMention(text) {
-  const lower = String(text || '').toLowerCase();
-  return ['rba', 'reserve bank of australia', 'cash rate', 'bullock', 'governor bullock'].some((keyword) => lower.includes(keyword));
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
+  return ['rba', 'reserve bank of australia', 'governor bullock', 'michele bullock'].some((keyword) => lower.includes(keyword));
 }
 
 function detectRatePolicyBias(text) {
-  const lower = String(text || '').toLowerCase();
+  const lower = String(text || '').toLowerCase().replace(/-/g, ' ');
   if (!lower) return 'WATCH';
 
-  if (['rate cut', 'cuts rates', 'cut rates', 'easing', 'dovish', 'lower rates', 'lowered rates'].some((keyword) => lower.includes(keyword))) {
-    return 'EASING';
-  }
-
-  if (['rate hike', 'hikes rates', 'hiked rates', 'raises rates', 'raised rates', 'tightening', 'hawkish', 'higher for longer'].some((keyword) => lower.includes(keyword))) {
+  if (
+    ['rate hike', 'hikes rates', 'hiked rates', 'raises rates', 'raised rates', 'tightening', 'hawkish', 'higher for longer', 'push back rate cut', 'delay rate cut', 'no rate cut', 'rules out rate cut', 'rule out rate cut'].some((keyword) => lower.includes(keyword))
+  ) {
     return 'TIGHTENING';
   }
 
-  if (['held rates', 'holds rates', 'held interest rates', 'holds interest rates', 'kept rates', 'keeps rates', 'keeps interest rates', 'left rates unchanged', 'left interest rates unchanged', 'holds interest rates steady', 'keeps interest rates steady', 'unchanged'].some((keyword) => lower.includes(keyword))) {
+  if (
+    ['rate cut', 'cuts rates', 'cut rates', 'easing', 'dovish', 'lower rates', 'lowered rates'].some((keyword) => lower.includes(keyword))
+  ) {
+    return 'EASING';
+  }
+
+  if (
+    ['held rates', 'holds rates', 'held interest rates', 'holds interest rates', 'kept rates', 'keeps rates', 'keeps interest rates', 'left rates unchanged', 'left interest rates unchanged', 'holds interest rates steady', 'keeps interest rates steady', 'unchanged', 'rates steady'].some((keyword) => lower.includes(keyword))
+  ) {
     return 'HOLD';
   }
 
@@ -138,7 +144,7 @@ function summarizeRateImpact(bank, bias, sector, ticker) {
   return `${bank} policy remains a live watch item for ${tickerLabel}; the current macro set does not yet show a clear directional rate signal.`;
 }
 
-function buildCentralBankImpact(bank, articles, sector, ticker) {
+function buildCentralBankImpact(bank, articles, sector, ticker, macroIndicators = null) {
   const matcher = bank === 'FED' ? detectFedMention : detectRbaMention;
   const bankArticles = (articles || []).filter((article) => {
     const text = `${article?.title || ''} ${article?.summary || ''}`;
@@ -147,13 +153,49 @@ function buildCentralBankImpact(bank, articles, sector, ticker) {
   const latestArticle = bankArticles
     .slice()
     .sort((left, right) => safeNumber(left?.hoursAgo, 0) - safeNumber(right?.hoursAgo, 0))[0] || null;
-  const bias = detectRatePolicyBias(`${latestArticle?.title || ''} ${latestArticle?.summary || ''}`);
+
+  const config = require('../../../../backend/lib/config');
+  const defaultBias = bank === 'FED' ? config.defaultFedPolicyBias : config.defaultRbaPolicyBias;
+
+  let bias = latestArticle
+    ? detectRatePolicyBias(`${latestArticle?.title || ''} ${latestArticle?.summary || ''}`)
+    : defaultBias;
+
+  let biasOverrideReason = null;
+  if (bank === 'RBA' && macroIndicators && macroIndicators.available) {
+    const inflationVal = macroIndicators.trimmedMean ?? macroIndicators.cpi;
+    if (inflationVal !== null && inflationVal !== undefined) {
+      if (inflationVal > 3.0) {
+        bias = 'TIGHTENING';
+        biasOverrideReason = `Inflation indicators are high (Trimmed Mean/CPI at ${inflationVal}%, above RBA 2-3% target band)`;
+      } else if (inflationVal < 2.0) {
+        bias = 'EASING';
+        biasOverrideReason = `Inflation indicators are low (Trimmed Mean/CPI at ${inflationVal}%, below RBA 2-3% target band)`;
+      } else {
+        bias = 'HOLD';
+        biasOverrideReason = `Inflation indicators are within target band (Trimmed Mean/CPI at ${inflationVal}%)`;
+      }
+    }
+  }
+
+  const available = latestArticle !== null || bias !== 'WATCH';
+  let headline = latestArticle?.title || null;
+  if (!headline) {
+    if (biasOverrideReason) {
+      const parts = [];
+      if (macroIndicators.cpi !== null) parts.push(`CPI at ${macroIndicators.cpi}%`);
+      if (macroIndicators.trimmedMean !== null) parts.push(`Trimmed Mean at ${macroIndicators.trimmedMean}%`);
+      headline = `RBA policy bias is overridden to ${bias} based on ABS macro indicators: ${parts.join(', ')}.`;
+    } else {
+      headline = `${bank} policy remains under the ${bias.toLowerCase()} regime (baseline fallback).`;
+    }
+  }
 
   return {
     bank,
-    available: bankArticles.length > 0,
+    available,
     bias,
-    headline: latestArticle?.title || `No fresh ${bank} rate headline in current macro window.`,
+    headline,
     hoursAgo: Number.isFinite(Number(latestArticle?.hoursAgo)) ? Number(latestArticle.hoursAgo) : null,
     impact: summarizeRateImpact(bank, bias, sector, ticker),
   };
@@ -162,8 +204,8 @@ function buildCentralBankImpact(bank, articles, sector, ticker) {
 function buildMonetaryPolicyContext(articles, sector, ticker, policyDecisions = {}) {
   return {
     available: true,
-    fed: buildCentralBankImpact('FED', policyDecisions?.fed ? [policyDecisions.fed, ...(articles || [])] : articles, sector, ticker),
-    rba: buildCentralBankImpact('RBA', policyDecisions?.rba ? [policyDecisions.rba, ...(articles || [])] : articles, sector, ticker),
+    fed: buildCentralBankImpact('FED', policyDecisions?.fed ? [policyDecisions.fed, ...(articles || [])] : articles, sector, ticker, policyDecisions?.macroIndicators),
+    rba: buildCentralBankImpact('RBA', policyDecisions?.rba ? [policyDecisions.rba, ...(articles || [])] : articles, sector, ticker, policyDecisions?.macroIndicators),
   };
 }
 
@@ -257,8 +299,39 @@ function buildMacroContext({ ticker, sector, macroNews = [], policyDecisions = {
     articles = dedupeArticlesByTitle([latestMonetaryArticle, ...articles]).slice(0, 6);
   }
 
+  // ── News Sentiment Score (pure, unblended) ────────────────────────────────
+  // NOTE: ABS macro data is intentionally NOT mixed into this score.
+  //
+  // ABS indicators already contribute to the final BUY/SELL/HOLD score through
+  // two dedicated, non-overlapping channels inside scoring.js:
+  //   1. "High CPI Inflation (ABS)"     → direct signal from indicators.cpi > 3%
+  //   2. "Central Bank Policy Headwind" → via RBA/FED policy bias (policyOverlay)
+  //
+  // Mixing ABS into compositeScore here would cause triple-counting of the same
+  // CPI data: once via compositeScore → macroSent, once via riskLevel → Macro
+  // Risk-Off, and once via the dedicated ABS signals in scoring.js.
+  //
+  // compositeScore reflects only what current market news/sentiment says.
+  // ABS structural regime is computed separately for display transparency only.
+  const macroIndicatorsForSentiment = policyDecisions?.macroIndicators;
+  let absRegimeLabel = null;    // for marketContext display only, NOT for scoring
+  if (macroIndicatorsForSentiment && macroIndicatorsForSentiment.available) {
+    const inflationVal = macroIndicatorsForSentiment.trimmedMean ?? macroIndicatorsForSentiment.cpi;
+    if (inflationVal !== null && inflationVal !== undefined) {
+      if (inflationVal > 4.0)       absRegimeLabel = 'tightening (severe)';
+      else if (inflationVal > 3.0)  absRegimeLabel = 'tightening';
+      else if (inflationVal < 1.5)  absRegimeLabel = 'easing (aggressive)';
+      else if (inflationVal < 2.0)  absRegimeLabel = 'easing';
+      else                          absRegimeLabel = 'on-target (hold)';
+    }
+  }
+
+  const hasAbsData = macroIndicatorsForSentiment?.available && absRegimeLabel !== null;
+
+  // compositeScore = pure news sentiment. No ABS blending here.
   const score = parseFloat(average(articles.map((article) => safeNumber(article.sentiment))).toFixed(2));
-  const sentimentLabel = score > 0.25 ? 'RISK_ON' : score < -0.25 ? 'RISK_OFF' : 'BALANCED';
+  const compositeScore = score;
+  let sentimentLabel = compositeScore > 0.25 ? 'RISK_ON' : compositeScore < -0.25 ? 'RISK_OFF' : 'BALANCED';
 
   const themeCounts = articles.reduce((accumulator, article) => {
     const theme = article.theme || 'GENERAL_MACRO';
@@ -287,22 +360,42 @@ function buildMacroContext({ ticker, sector, macroNews = [], policyDecisions = {
       : 'LOW';
 
   const headline = articles[0]?.title || 'No major macro headlines captured.';
-  const marketContext = articles.length
-    ? `Macro tone is ${sentimentLabel.toLowerCase().replace('_', '-')}, led by ${dominantThemes.map((item) => item.theme.toLowerCase().replace(/_/g, ' ')).join(', ')} headlines. Latest focus: ${headline}`
-    : 'Macro feed unavailable; current view relies on ticker-specific news only.';
+  const newsToneLabel = score > 0.25 ? 'risk-on' : score < -0.25 ? 'risk-off' : 'balanced';
+  let marketContext;
+  if (!articles.length) {
+    marketContext = 'Macro feed unavailable; current view relies on ticker-specific news only.';
+  } else if (hasAbsData) {
+    // Show both components transparently when ABS data is available
+    marketContext = `News tone: ${newsToneLabel} (score ${score > 0 ? '+' : ''}${score.toFixed(2)}), ABS macro regime: ${absRegimeLabel}. Composite signal: ${sentimentLabel.toLowerCase().replace('_', '-')} — led by ${dominantThemes.map((item) => item.theme.toLowerCase().replace(/_/g, ' ')).join(', ')} headlines. Latest: ${headline}`;
+  } else {
+    marketContext = `Macro tone is ${sentimentLabel.toLowerCase().replace('_', '-')}, led by ${dominantThemes.map((item) => item.theme.toLowerCase().replace(/_/g, ' ')).join(', ')} headlines. Latest focus: ${headline}`;
+  }
+
+  const macroIndicators = policyDecisions?.macroIndicators;
+  if (macroIndicators && macroIndicators.available) {
+    const parts = [];
+    if (macroIndicators.cpi !== null) parts.push(`CPI: ${macroIndicators.cpi}%`);
+    if (macroIndicators.trimmedMean !== null) parts.push(`Trimmed Mean: ${macroIndicators.trimmedMean}%`);
+    if (macroIndicators.gdpGrowth !== null) parts.push(`GDP Growth: ${macroIndicators.gdpGrowth}%`);
+    if (macroIndicators.unemploymentRate !== null) parts.push(`Unemployment: ${macroIndicators.unemploymentRate}%`);
+    if (parts.length > 0) {
+      marketContext += ` [ABS: ${parts.join(', ')}]`;
+    }
+  }
 
   const impactNotes = dominantThemes.map((item) => summarizeThemeImpact(item.theme, sector, ticker));
   const monetaryPolicy = buildMonetaryPolicyContext(articles, sector, ticker, policyDecisions);
 
   return {
     available: articles.length > 0,
-    sentimentScore: score,
+    sentimentScore: compositeScore,     // pure news sentiment — ABS enters via scoring.js dedicated signals
     sentimentLabel,
     riskLevel,
     dominantThemes,
     marketContext,
     impactNotes,
     monetaryPolicy,
+    macroIndicators: macroIndicators || { available: false },
     news: articles,
     sourceBreakdown: {
       articleCount: articles.length,

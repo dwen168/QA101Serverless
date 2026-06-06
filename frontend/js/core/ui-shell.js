@@ -63,6 +63,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (lightIcon) lightIcon.style.display = 'none';
     if (darkIcon) darkIcon.style.display = 'block';
   }
+
+  // Initialize data mode from localStorage
+  const savedMode = getDataMode();
+  setDataMode(savedMode);
 });
 
 function escapeHtml(value) {
@@ -111,3 +115,41 @@ window.setMobileTab = setMobileTab;
 window.escapeHtml = escapeHtml;
 window.sanitizeHtmlFragment = sanitizeHtmlFragment;
 window.sanitizeElementHtml = sanitizeElementHtml;
+
+function setDataMode(mode) {
+  const toggle = document.getElementById('mode-toggle');
+  const indicator = document.getElementById('workspace-mode-indicator');
+  if (!toggle) return;
+
+  if (mode === 'live') {
+    toggle.classList.remove('mock');
+    toggle.classList.add('live');
+    if (indicator) {
+      indicator.textContent = 'Live Mode';
+      indicator.classList.remove('mock-mode');
+    }
+    localStorage.setItem('quantbot.dataMode', 'live');
+  } else {
+    toggle.classList.remove('live');
+    toggle.classList.add('mock');
+    if (indicator) {
+      indicator.textContent = 'Mock Mode';
+      indicator.classList.add('mock-mode');
+    }
+    localStorage.setItem('quantbot.dataMode', 'mock');
+  }
+}
+
+function getDataMode() {
+  return localStorage.getItem('quantbot.dataMode') || 'mock';
+}
+
+function toggleDataMode() {
+  const current = getDataMode();
+  const nextMode = current === 'live' ? 'mock' : 'live';
+  setDataMode(nextMode);
+}
+
+window.setDataMode = setDataMode;
+window.getDataMode = getDataMode;
+window.toggleDataMode = toggleDataMode;

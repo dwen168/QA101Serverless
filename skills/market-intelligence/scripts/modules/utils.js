@@ -109,6 +109,43 @@ async function withTimeout(promise, timeoutMs, label = 'operation') {
   }
 }
 
+function cleanCompanyName(name) {
+  if (!name || typeof name !== 'string') return '';
+  let clean = name.trim().toLowerCase();
+  clean = clean.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, ' ');
+  const suffixes = [
+    'corporation', 'corp', 'incorporated', 'inc', 'company', 'co', 
+    'limited', 'ltd', 'group', 'plc', 's a', 'sa', 'ag', 'gmbh', 
+    'holding', 'holdings', 'trust', 'fund', 'etf'
+  ];
+  suffixes.forEach(suffix => {
+    const regex = new RegExp(`\\b${suffix}\\b`, 'g');
+    clean = clean.replace(regex, '');
+  });
+  clean = clean.replace(/\s+/g, ' ').trim();
+  return clean;
+}
+
+function calculateTimeDecayedSentiment(articles, lambda = 0.2) {
+  const news = Array.isArray(articles) ? articles.filter(Boolean) : [];
+  if (news.length === 0) return 0;
+  
+  let weightedSum = 0;
+  let weightTotal = 0;
+  
+  news.forEach(article => {
+    const daysAgo = (safeNumber(article.hoursAgo, 0)) / 24;
+    const weight = Math.exp(-lambda * daysAgo);
+    weightedSum += (safeNumber(article.sentiment, 0)) * weight;
+    weightTotal += weight;
+    article.influenceWeight = parseFloat((weight * 100).toFixed(1));
+  });
+  
+  return weightTotal > 0 
+    ? parseFloat((weightedSum / weightTotal).toFixed(2)) 
+    : 0;
+}
+
 module.exports = {
   REAL_DATA_TIMEOUT_MS,
   ENRICHMENT_TIMEOUT_MS,
@@ -125,4 +162,6 @@ module.exports = {
   normalizeConfidence,
   sanitizeShortText,
   withTimeout,
+  cleanCompanyName,
+  calculateTimeDecayedSentiment,
 };

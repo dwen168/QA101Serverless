@@ -953,7 +953,7 @@ function buildRuleBasedPortfolioNarrative({ rankedTickers, sectorAnalysis, diver
   };
 }
 
-async function runPortfolioOptimization({ tickers, useMarketData = [], timeHorizon = 'MEDIUM' }, dependencies = {}) {
+async function runPortfolioOptimization({ tickers, useMarketData = [], timeHorizon = 'MEDIUM', mode }, dependencies = {}) {
   // Validate input
   if (!Array.isArray(tickers) || tickers.length === 0) {
     throw new Error('tickers array is required and must not be empty');
@@ -977,7 +977,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
       const perRequestDelayMs = shouldThrottle ? 200 : 0;
 
       const settled = await mapWithConcurrency(tickers, async (ticker) => {
-        const result = await runMarketIntelligence({ ticker }, dependencies);
+        const result = await runMarketIntelligence({ ticker, mode }, dependencies);
         return result?.marketData || null;
       }, { concurrency, delayMs: perRequestDelayMs });
 

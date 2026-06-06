@@ -90,7 +90,16 @@ function generateMockMarketData(ticker) {
   const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
   const rsi = parseFloat((100 - 100 / (1 + rs)).toFixed(1));
 
-  const sentimentScore = parseFloat(rand(-0.8, 0.9).toFixed(2));
+  const news = [
+    { title: `${stockInfo.name} Reports Strong Q4 Earnings, Beats Expectations`, source: 'Reuters', sentiment: 0.75, hoursAgo: 2 },
+    { title: `Analysts Raise Price Target for ${ticker} Amid AI Expansion`, source: 'Bloomberg', sentiment: 0.6, hoursAgo: 5 },
+    { title: `${stockInfo.sector} Sector Faces Regulatory Scrutiny`, source: 'WSJ', sentiment: -0.4, hoursAgo: 12 },
+    { title: `${stockInfo.name} Announces New Product Line, Shares React`, source: 'CNBC', sentiment: 0.45, hoursAgo: 18 },
+    { title: `Macro Headwinds Could Pressure ${ticker} in Near Term`, source: 'FT', sentiment: -0.3, hoursAgo: 24 },
+  ];
+
+  const { calculateTimeDecayedSentiment } = require('./utils');
+  const sentimentScore = calculateTimeDecayedSentiment(news);
   const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
 
   const buyCount = Math.floor(rand(5, 20));
@@ -99,14 +108,6 @@ function generateMockMarketData(ticker) {
   const targetHigh = price * rand(1.1, 1.35);
   const targetLow = price * rand(0.8, 0.98);
   const targetMean = (targetHigh + targetLow) / 2;
-
-  const news = [
-    { title: `${stockInfo.name} Reports Strong Q4 Earnings, Beats Expectations`, source: 'Reuters', sentiment: 0.75, hoursAgo: 2 },
-    { title: `Analysts Raise Price Target for ${ticker} Amid AI Expansion`, source: 'Bloomberg', sentiment: 0.6, hoursAgo: 5 },
-    { title: `${stockInfo.sector} Sector Faces Regulatory Scrutiny`, source: 'WSJ', sentiment: -0.4, hoursAgo: 12 },
-    { title: `${stockInfo.name} Announces New Product Line, Shares React`, source: 'CNBC', sentiment: 0.45, hoursAgo: 18 },
-    { title: `Macro Headwinds Could Pressure ${ticker} in Near Term`, source: 'FT', sentiment: -0.3, hoursAgo: 24 },
-  ];
 
   const macroNews = [
     {
@@ -120,8 +121,18 @@ function generateMockMarketData(ticker) {
       scope: 'macro',
     },
     {
+      title: 'RBA warns of persistent inflation, flags potential rate hikes',
+      summary: 'Governor Michele Bullock stated that the Reserve Bank of Australia keeps tightening policy on the table as domestic services inflation remains sticky.',
+      url: '',
+      source: 'Mock Macro Feed',
+      sentiment: -0.35,
+      hoursAgo: 6,
+      theme: 'MONETARY_POLICY',
+      scope: 'macro',
+    },
+    {
       title: 'Fed officials signal patience as markets push back rate-cut timing',
-      summary: 'Higher-for-longer rates are supporting the dollar and pressuring long-duration growth multiples.',
+      summary: 'Higher-for-longer rates are supporting the dollar and pressure growth multiples.',
       url: '',
       source: 'Mock Macro Feed',
       sentiment: -0.2,
@@ -218,6 +229,45 @@ function generateMockMarketData(ticker) {
     tradingScore: parseFloat(rand(-0.45, 0.9).toFixed(2)),
   }));
 
+  const macroAnchors = [
+    {
+      ticker: 'CL=F',
+      name: 'Crude Oil',
+      type: 'commodity',
+      currentPrice: 78.5,
+      changePercent: 6.2,
+      trend: 'BULLISH',
+      history: Array.from({ length: 30 }, (_, i) => ({ close: 72 + i * 0.2 + rand(-0.5, 0.5) }))
+    },
+    {
+      ticker: 'GC=F',
+      name: 'Gold',
+      type: 'commodity',
+      currentPrice: 2350.2,
+      changePercent: 1.8,
+      trend: 'NEUTRAL',
+      history: Array.from({ length: 30 }, (_, i) => ({ close: 2300 + rand(-10, 10) }))
+    },
+    {
+      ticker: '^VIX',
+      name: 'VIX Volatility',
+      type: 'index',
+      currentPrice: 14.2,
+      changePercent: -8.5,
+      trend: 'BEARISH',
+      history: Array.from({ length: 30 }, (_, i) => ({ close: 18 - i * 0.1 + rand(-0.5, 0.5) }))
+    },
+    {
+      ticker: '^TNX',
+      name: '10Y Treasury',
+      type: 'rate',
+      currentPrice: 4.45,
+      changePercent: 12.3,
+      trend: 'BULLISH',
+      history: Array.from({ length: 30 }, (_, i) => ({ close: 4.0 + i * 0.015 + rand(-0.02, 0.02) }))
+    }
+  ];
+
   return {
     ticker,
     name: stockInfo.name,
@@ -258,6 +308,20 @@ function generateMockMarketData(ticker) {
       ticker,
       sector: stockInfo.sector,
       macroNews,
+      policyDecisions: {
+        fed: null,
+        rba: null,
+        macroIndicators: isAsx ? {
+          available: true,
+          cpi: 4.1,
+          cpiDate: 'Q1 2026',
+          trimmedMean: 3.5,
+          gdpGrowth: 1.5,
+          gdpDate: 'Q4 2025',
+          unemploymentRate: 3.8,
+          unemploymentDate: 'Apr 2026',
+        } : { available: false }
+      },
     }),
     sectorTrends,
     benchmarkTrend,
@@ -266,6 +330,7 @@ function generateMockMarketData(ticker) {
     collectedAt: new Date().toISOString(),
     dataSource: 'mock',
     fallbackReason: null,
+    macroAnchors,
   };
 }
 

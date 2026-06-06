@@ -3,8 +3,8 @@ const { runEdaVisualAnalysis } = require('../../skills/eda-visual-analysis/scrip
 const { runTradeRecommendation } = require('../../skills/trade-recommendation/scripts');
 const { runPortfolioOptimization } = require('../../skills/portfolio-optimization/scripts');
 
-async function runFullAnalysis({ ticker, timeHorizon = 'MEDIUM' }) {
-  const marketIntelligence = await runMarketIntelligence({ ticker });
+async function runFullAnalysis({ ticker, timeHorizon = 'MEDIUM', mode }) {
+  const marketIntelligence = await runMarketIntelligence({ ticker, mode });
   const eda = await runEdaVisualAnalysis({ marketData: marketIntelligence.marketData });
   const tradeRecommendation = await runTradeRecommendation({
     marketData: marketIntelligence.marketData,
@@ -21,11 +21,12 @@ async function runFullAnalysis({ ticker, timeHorizon = 'MEDIUM' }) {
   };
 }
 
-async function runPortfolioAnalysis({ tickers, timeHorizon = 'MEDIUM' }) {
+async function runPortfolioAnalysis({ tickers, timeHorizon = 'MEDIUM', mode }) {
   const portfolioOptimization = await runPortfolioOptimization({
     tickers,
     useMarketData: [], // Will fetch live data
     timeHorizon,
+    mode,
   });
 
   return {

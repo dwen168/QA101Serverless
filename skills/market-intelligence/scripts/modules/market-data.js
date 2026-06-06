@@ -7,7 +7,9 @@ const {
   safeNumber, 
   safeString,
   average, 
-  dedupeArticlesByTitle 
+  dedupeArticlesByTitle,
+  cleanCompanyName,
+  calculateTimeDecayedSentiment
 } = require('./utils');
 const { buildMacroContext } = require('./macro');
 const { 
@@ -44,7 +46,8 @@ const {
   fetchLatestCentralBankDecision, 
   fetchAsicShortSellingData, 
   fetchAsxAnnouncements, 
-  fetchGoogleNewsRss 
+  fetchGoogleNewsRss,
+  fetchRbaMacroIndicators
 } = require('./api-news');
 
 const MACRO_RECENT_HOURS = 48;
@@ -575,9 +578,9 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
   const trend = price > ma50 ? (price > ma20 ? 'BULLISH' : 'NEUTRAL') : 'BEARISH';
 
   const companyName = profile?.name || `${ticker} Corp.`;
-  const sector = profile?.sector || 'Unknown';
+  const isAsx = ticker.toUpperCase().endsWith('.AX');
 
-  const [companyNewsResult, macroNewsResult, fedDecisionResult, rbaDecisionResult, sectorTrendsResult, benchmarkTrendResult, peerComparisonsResult] = await Promise.allSettled([
+  const [companyNewsResult, macroNewsResult, fedDecisionResult, rbaDecisionResult, sectorTrendsResult, benchmarkTrendResult, peerComparisonsResult, macroIndicatorsResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubNews(ticker, {
       sector,
       companyName,
@@ -613,6 +616,15 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       });
       return await fetchPeerComparisons(ticker, resolvedPeers);
     })(),
+    (async () => {
+      if (!isAsx) return { available: false };
+      try {
+        return await withTimeout(fetchRbaMacroIndicators(), ENRICHMENT_TIMEOUT_MS, `RBA macro indicators fetch for ${ticker}`);
+      } catch (error) {
+        console.warn(`RBA macro indicators fetch failed:`, error.message);
+        return { available: false };
+      }
+    })(),
   ]);
 
   let companyNews = companyNewsResult.status === 'fulfilled' ? companyNewsResult.value : [];
@@ -637,14 +649,13 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
   const policyDecisions = {
     fed: fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null,
     rba: rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null,
+    macroIndicators: macroIndicatorsResult.status === 'fulfilled' ? macroIndicatorsResult.value : { available: false },
   };
   const sectorTrends = sectorTrendsResult.status === 'fulfilled' ? sectorTrendsResult.value : [];
   const benchmarkTrend = benchmarkTrendResult.status === 'fulfilled' ? benchmarkTrendResult.value : null;
   const peerComparisons = peerComparisonsResult.status === 'fulfilled' ? peerComparisonsResult.value : [];
 
-  const sentimentScore = Array.isArray(companyNews) && companyNews.length > 0
-    ? parseFloat((companyNews.reduce((sum, article) => sum + safeNumber(article.sentiment), 0) / companyNews.length).toFixed(2))
-    : 0;
+  const sentimentScore = calculateTimeDecayedSentiment(companyNews);
   const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
 
   const consensus = recommendations || {
@@ -870,7 +881,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const startNews = Date.now();
   const isAsx = ticker.toUpperCase().endsWith('.AX');
   
-  const [yahooNews, macroNews, shortMetrics, fedDecision, rbaDecision, peerSymbols, sectorTrends, benchmarkTrend] = await Promise.all([
+  const [yahooNews, macroNews, shortMetrics, fedDecision, rbaDecision, peerSymbols, sectorTrends, benchmarkTrend, macroIndicators] = await Promise.all([
     (async () => {
       try {
         const companyName = priceMod.longName || priceMod.shortName || ticker;
@@ -945,26 +956,33 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
 
         const allNews = dedupeArticlesByTitle([...ruleScoredYahoo, ...asxItems, ...googleItems]);
 
+        const cleanName = cleanCompanyName(companyName);
         const searchTerms = [
           ticker.toUpperCase(),
           ticker.split('.')[0].toUpperCase(),
-          ...(companyName.split(' ').slice(0, 3)),
         ];
+        if (cleanName) {
+          cleanName.split(' ').forEach(w => {
+            if (w.length > 1) searchTerms.push(w.toUpperCase());
+          });
+        }
+
         const relevantNews = allNews.filter((news) => {
           const headline = (news.title || '').toUpperCase();
-          return searchTerms.some((term) => term.length > 1 && headline.includes(term.toUpperCase()));
+          return searchTerms.some((term) => headline.includes(term));
         });
 
+        const finalCandidates = relevantNews.length > 0 ? relevantNews : allNews.slice(0, 5);
+
         const startCompanyLlm = Date.now();
-        const llmCandidates = relevantNews.length > 0 ? relevantNews : allNews.slice(0, 6);
-        let result = allNews;
-        if (llmCandidates.length > 0) {
-          const llmScored = await scoreCompanyNewsWithLlm(llmCandidates, {
+        let result = finalCandidates;
+        if (finalCandidates.length > 0) {
+          const llmScored = await scoreCompanyNewsWithLlm(finalCandidates, {
             ticker,
             sector: sp.sector || sp.industry || 'Unknown',
             companyName,
           }, dependencies);
-          result = allNews.map((news) => {
+          result = finalCandidates.map((news) => {
             const llmVersion = llmScored.find((n) => n.title === news.title);
             return llmVersion
               ? {
@@ -1029,6 +1047,13 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
     })(),
     (async () => {
       try {
+        return await withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`);
+      } catch {
+        return null;
+      }
+    })(),
+    (async () => {
+      try {
         return await withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`);
       } catch {
         return null;
@@ -1061,6 +1086,15 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
         return null;
       }
     })(),
+    (async () => {
+      if (!isAsx) return { available: false };
+      try {
+        return await withTimeout(fetchRbaMacroIndicators(), ENRICHMENT_TIMEOUT_MS, `RBA macro indicators fetch for ${ticker}`);
+      } catch (error) {
+        console.warn(`RBA macro indicators fetch failed:`, error.message);
+        return { available: false };
+      }
+    })(),
   ]);
 
   const sectorLabel = normalizeSector(sp.sector || sp.industry || 'Unknown');
@@ -1074,9 +1108,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const peerComparisons = await fetchPeerComparisons(ticker, resolvedYahooPeers);
   perfMs.newsTotal = Date.now() - startNews;
 
-  const sentimentScore = yahooNews.length > 0
-    ? parseFloat((yahooNews.reduce((s, n) => s + (n.sentiment || 0), 0) / yahooNews.length).toFixed(2))
-    : 0;
+  const sentimentScore = calculateTimeDecayedSentiment(yahooNews);
   const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
 
   const targetMean = safeNumber(fd.targetMeanPrice);
@@ -1136,7 +1168,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       ticker,
       sector: sectorLabel,
       macroNews,
-      policyDecisions: { fed: fedDecision, rba: rbaDecision },
+      policyDecisions: { fed: fedDecision, rba: rbaDecision, macroIndicators },
     }),
     sectorTrends,
     benchmarkTrend,
@@ -1239,8 +1271,9 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
 
   const name = finnhubProfile?.name || `${ticker} Corp.`;
   const sector = finnhubProfile?.sector || 'Unknown';
+  const isAsx = ticker.toUpperCase().endsWith('.AX');
 
-  const [finnhubNews, macroNews, fedDecision, rbaDecision, sectorTrends, benchmarkTrend] = await Promise.all([
+  const [finnhubNews, macroNews, fedDecision, rbaDecision, sectorTrends, benchmarkTrend, macroIndicators] = await Promise.all([
     (async () => {
       if (!config.finnhubApiKey) return [];
       try {
@@ -1297,6 +1330,15 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
         return null;
       }
     })(),
+    (async () => {
+      if (!isAsx) return { available: false };
+      try {
+        return await withTimeout(fetchRbaMacroIndicators(), ENRICHMENT_TIMEOUT_MS, `RBA macro indicators fetch for ${ticker}`);
+      } catch (error) {
+        console.warn(`RBA macro indicators fetch failed:`, error.message);
+        return { available: false };
+      }
+    })(),
   ]);
 
   const resolvedPeers = resolvePeerUniverse({
@@ -1306,9 +1348,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
   });
   const peerComparisons = await fetchPeerComparisons(ticker, resolvedPeers);
 
-  const sentimentScore = finnhubNews.length > 0
-    ? parseFloat((finnhubNews.reduce((sum, n) => sum + (n.sentiment || 0), 0) / finnhubNews.length).toFixed(2))
-    : 0;
+  const sentimentScore = calculateTimeDecayedSentiment(finnhubNews);
   const sentimentLabel = sentimentScore > 0.3 ? 'BULLISH' : sentimentScore < -0.3 ? 'BEARISH' : 'NEUTRAL';
 
   const consensus = finnhubRecommendations || {
@@ -1366,7 +1406,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       ticker,
       sector,
       macroNews,
-      policyDecisions: { fed: fedDecision, rba: rbaDecision },
+      policyDecisions: { fed: fedDecision, rba: rbaDecision, macroIndicators },
     }),
     sectorTrends,
     benchmarkTrend,

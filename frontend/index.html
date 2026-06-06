@@ -41,6 +41,14 @@
   </div>
   <div class="header-right">
     <div class="header-status-group">
+      <div class="mode-switch-container" id="mode-switch-container">
+        <span class="mode-switch-label">Data</span>
+        <div class="mode-toggle mock" id="mode-toggle" onclick="toggleDataMode()" role="button" tabindex="0" aria-label="Toggle Data Mode">
+          <span class="mode-toggle-option option-mock">Mock</span>
+          <span class="mode-toggle-option option-live">Live</span>
+          <div class="mode-toggle-slider"></div>
+        </div>
+      </div>
       <div class="llm-switcher">
         <span class="llm-switcher-label">LLM</span>
         <select id="llm-provider" class="llm-provider-select" onchange="handleLlmProviderChange()">
@@ -131,7 +139,7 @@
         <div class="workspace-kicker">Workspace</div>
         <div class="workspace-title-row">
           <h1 class="workspace-title">Analyze stocks, optimize portfolios, or backtest strategies</h1>
-          <span class="workspace-live-indicator">Live</span>
+          <span class="workspace-live-indicator" id="workspace-mode-indicator">Mock Mode</span>
         </div>
         <p class="workspace-description">Market research with quant analysis and explainable recommendations.</p>
         <div class="workspace-metrics">

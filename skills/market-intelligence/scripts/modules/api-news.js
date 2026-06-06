@@ -216,13 +216,75 @@ async function fetchGoogleNewsRssQuery(queryStr) {
   }
 }
 
+async function fetchRbaCsvData() {
+  try {
+    const url = 'https://www.rba.gov.au/statistics/tables/csv/a2-data.csv';
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!response.ok) return null;
+    const text = await response.text();
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const dateRowRegex = /^\d{1,2}-[A-Za-z]{3}-\d{4}/;
+    const dataRows = lines.filter((line) => dateRowRegex.test(line));
+    
+    if (dataRows.length === 0) return null;
+    
+    const lastRow = dataRows[dataRows.length - 1];
+    const columns = lastRow.split(',');
+    
+    const date = columns[0].trim();
+    const change = columns[1].trim();
+    const newTarget = columns[2].trim();
+    
+    return {
+      date,
+      change,
+      newTarget,
+    };
+  } catch (error) {
+    console.warn('[RBA CSV Fetch] Failed to fetch or parse CSV:', error.message);
+    return null;
+  }
+}
+
 async function fetchLatestCentralBankDecision(bank) {
+  if (bank === 'RBA') {
+    const csvData = await fetchRbaCsvData();
+    if (csvData) {
+      const changeVal = csvData.change;
+      const changeNum = parseFloat(changeVal);
+      let bias = 'WATCH';
+      if (changeNum > 0) bias = 'TIGHTENING';
+      else if (changeNum < 0) bias = 'EASING';
+      else if (changeNum === 0 || changeVal === '0') bias = 'HOLD';
+      
+      const headline = `RBA changed Cash Rate Target by ${changeVal} percentage points to ${csvData.newTarget}%`;
+      const dateMs = Date.parse(csvData.date);
+      const hoursAgo = dateMs > 0 ? Math.max(0, Math.round((Date.now() - dateMs) / 3600000)) : 0;
+      
+      return {
+        title: headline,
+        summary: `The Reserve Bank of Australia announced a monetary policy adjustment on ${csvData.date}. New Cash Rate Target is ${csvData.newTarget}%.`,
+        url: 'https://www.rba.gov.au/statistics/cash-rate/',
+        source: 'RBA Official CSV',
+        sentiment: changeNum > 0 ? -0.25 : changeNum < 0 ? 0.25 : 0,
+        hoursAgo,
+        publishedAt: dateMs > 0 ? new Date(dateMs).toISOString() : null,
+        theme: 'MONETARY_POLICY',
+        scope: 'macro',
+        bank,
+        bias,
+      };
+    }
+  }
+
   const apiKey = config.newsApiKey;
 
   const bankConfig = bank === 'RBA'
     ? {
         matcher: detectRbaMention,
-        query: '(("reserve bank of australia" OR rba OR bullock OR "cash rate") AND ("rate decision" OR "cash rate" OR "held rates" OR "left rates unchanged" OR "rate hike" OR "rate cut" OR "policy meeting" OR "meeting minutes"))',
+        query: '(("reserve bank of australia" OR rba OR "michele bullock") AND ("rate decision" OR "cash rate" OR "held rates" OR "left rates unchanged" OR "rate hike" OR "rate cut" OR "policy meeting" OR "meeting minutes"))',
       }
     : {
         matcher: detectFedMention,
@@ -378,6 +440,98 @@ async function fetchGoogleNewsRss(ticker, companyName) {
   }
 }
 
+function splitCsvLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function parseLatestMetric(csvText, titleKeyword) {
+  const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length < 5) return null;
+
+  const titleRowIdx = lines.findIndex(line => line.startsWith('Title') || line.startsWith('\ufeffTitle'));
+  if (titleRowIdx === -1) return null;
+
+  const headers = splitCsvLine(lines[titleRowIdx]);
+  const colIdx = headers.findIndex(h => h.toLowerCase().includes(titleKeyword.toLowerCase()));
+  if (colIdx === -1) return null;
+
+  const dateRowRegex = /^\d{1,2}\/\d{1,2}\/\d{4}/;
+
+  for (let i = lines.length - 1; i > titleRowIdx; i--) {
+    const cols = splitCsvLine(lines[i]);
+    if (!cols[0] || !dateRowRegex.test(cols[0])) continue;
+
+    const valStr = cols[colIdx] ? cols[colIdx].trim() : '';
+    if (valStr && !isNaN(parseFloat(valStr))) {
+      return {
+        date: cols[0],
+        value: parseFloat(valStr)
+      };
+    }
+  }
+  return null;
+}
+
+async function fetchRbaMacroIndicators() {
+  try {
+    const headers = { 'User-Agent': 'Mozilla/5.0' };
+    const [g1Res, h1Res, h5Res] = await Promise.allSettled([
+      fetch('https://www.rba.gov.au/statistics/tables/csv/g1-data.csv', { headers }),
+      fetch('https://www.rba.gov.au/statistics/tables/csv/h1-data.csv', { headers }),
+      fetch('https://www.rba.gov.au/statistics/tables/csv/h5-data.csv', { headers }),
+    ]);
+
+    let cpiData = null;
+    let trimmedMeanData = null;
+    if (g1Res.status === 'fulfilled' && g1Res.value.ok) {
+      const text = await g1Res.value.text();
+      cpiData = parseLatestMetric(text, 'Year-ended inflation');
+      trimmedMeanData = parseLatestMetric(text, 'trimmed mean');
+    }
+
+    let gdpData = null;
+    if (h1Res.status === 'fulfilled' && h1Res.value.ok) {
+      const text = await h1Res.value.text();
+      gdpData = parseLatestMetric(text, 'Year-ended real GDP growth');
+    }
+
+    let unemploymentData = null;
+    if (h5Res.status === 'fulfilled' && h5Res.value.ok) {
+      const text = await h5Res.value.text();
+      unemploymentData = parseLatestMetric(text, 'Unemployment rate');
+    }
+
+    return {
+      available: !!(cpiData || trimmedMeanData || gdpData || unemploymentData),
+      cpi: cpiData ? cpiData.value : null,
+      cpiDate: cpiData ? cpiData.date : null,
+      trimmedMean: trimmedMeanData ? trimmedMeanData.value : null,
+      gdpGrowth: gdpData ? gdpData.value : null,
+      gdpDate: gdpData ? gdpData.date : null,
+      unemploymentRate: unemploymentData ? unemploymentData.value : null,
+      unemploymentDate: unemploymentData ? unemploymentData.date : null,
+    };
+  } catch (error) {
+    console.error('[RBA Indicators Fetch] Failed:', error.message);
+    return { available: false };
+  }
+}
+
 module.exports = {
   fetchAsicShortSellingData,
   fetchNewsApiMacroNews,
@@ -385,4 +539,6 @@ module.exports = {
   fetchLatestCentralBankDecision,
   fetchAsxAnnouncements,
   fetchGoogleNewsRss,
+  fetchRbaMacroIndicators,
 };
+

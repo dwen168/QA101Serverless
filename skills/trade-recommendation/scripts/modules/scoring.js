@@ -334,6 +334,24 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
         ], 'macro');
       }
     }
+
+    // Australian Macro Indicators (ABS / RBA)
+    const isAsx = marketData.ticker && typeof marketData.ticker === 'string' && marketData.ticker.toUpperCase().endsWith('.AX');
+    const indicators = macro.macroIndicators;
+    if (isAsx && indicators && indicators.available) {
+      if (indicators.cpi !== null && indicators.cpi > 3.0) {
+        add('High CPI Inflation (ABS)', macroWeight('macro_sector_headwind', -1), `ABS inflation is high at ${indicators.cpi}%, putting pressure on interest rates and valuations.`, [
+          { label: 'CPI inflation', value: `${indicators.cpi}%` },
+          { label: 'Threshold', value: '3.0%' }
+        ], 'macro');
+      }
+      if (indicators.unemploymentRate !== null && indicators.unemploymentRate < 4.0) {
+        add('Tight Labor Market (ABS)', macroWeight('macro_risk_bullish', 1), `ABS unemployment is low at ${indicators.unemploymentRate}%, showing strong economic demand.`, [
+          { label: 'Unemployment', value: `${indicators.unemploymentRate}%` },
+          { label: 'Threshold', value: '4.0%' }
+        ], 'macro');
+      }
+    }
   }
 
   // Macro Anchors Confirmation (Cross-Asset Validation)
@@ -342,6 +360,7 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
     const oil = getAnchor('CL=F');
     const vix = getAnchor('^VIX');
     const tnx = getAnchor('^TNX');
+    const gold = getAnchor('GC=F');
     const sector = canonicalizeSector(marketData.sector || 'Unknown');
 
     // Energy requires oil confirmation
@@ -353,6 +372,19 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       } else if (oil.trend === 'BEARISH') {
         add('Macro Anchor: Oil Weakness', macroWeight('macro_sector_headwind', -1), 'Crude oil trend is bearish, creating a fundamental headwind for Energy.', [
           { label: 'CL=F', value: `${fmt(oil.changePercent)}%` }
+        ], 'macro');
+      }
+    }
+
+    // Materials / Mining requires gold confirmation
+    if (['Materials', 'Mining'].includes(sector) && gold) {
+      if (gold.trend === 'BULLISH') {
+        add('Macro Anchor: Gold Rally', macroWeight('macro_risk_bullish', 1), 'Gold trend is bullish, supporting Materials and precious metal mining equities.', [
+          { label: 'GC=F', value: `+${fmt(gold.changePercent)}%` }
+        ], 'macro');
+      } else if (gold.trend === 'BEARISH') {
+        add('Macro Anchor: Gold Weakness', macroWeight('macro_sector_headwind', -1), 'Gold trend is bearish, creating a valuation headwind for precious metal miners.', [
+          { label: 'GC=F', value: `${fmt(gold.changePercent)}%` }
         ], 'macro');
       }
     }

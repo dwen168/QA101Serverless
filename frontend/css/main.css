@@ -1838,3 +1838,104 @@
     color: var(--cyan); border-color: var(--cyan); transform: scale(1.05);
   }
   .theme-toggle-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+  /* Mock/Live switch styling */
+  .mode-switch-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border2);
+    background: linear-gradient(180deg, rgba(22,34,53,0.96), rgba(13,23,40,0.92));
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+  }
+  .mode-switch-container:hover {
+    border-color: rgba(96,165,250,0.38);
+  }
+  .mode-switch-label {
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .mode-toggle {
+    display: flex;
+    position: relative;
+    width: 90px;
+    height: 24px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    overflow: hidden;
+    user-select: none;
+    transition: var(--transition);
+  }
+  .mode-toggle-option {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9.5px;
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--text3);
+    z-index: 2;
+    transition: var(--transition);
+    text-transform: uppercase;
+  }
+  .mode-toggle.mock .option-mock {
+    color: #07111f;
+  }
+  .mode-toggle.live .option-live {
+    color: #07111f;
+  }
+  .mode-toggle-slider {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 42px;
+    height: 20px;
+    background: var(--cyan);
+    border-radius: 999px;
+    z-index: 1;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s ease;
+    box-shadow: 0 2px 6px rgba(96,165,250,0.4);
+  }
+  .mode-toggle.live .mode-toggle-slider {
+    transform: translateX(44px);
+    background: var(--green);
+    box-shadow: 0 2px 6px rgba(52,211,153,0.4);
+  }
+
+  /* Mock mode workspace indicator */
+  .workspace-live-indicator.mock-mode {
+    color: var(--cyan);
+    border-color: rgba(96,165,250,0.24);
+    background: rgba(96,165,250,0.08);
+  }
+
+  /* Light theme variations */
+  [data-theme="light"] .mode-switch-container {
+    background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+    border-color: rgba(15, 23, 42, 0.08);
+  }
+  [data-theme="light"] .mode-switch-container:hover {
+    border-color: rgba(59,130,246,0.3);
+  }
+  [data-theme="light"] .mode-toggle {
+    background: #e2e8f0;
+    border-color: rgba(15, 23, 42, 0.08);
+  }
+  [data-theme="light"] .mode-toggle-option {
+    color: #64748b;
+  }
+  [data-theme="light"] .mode-toggle.mock .option-mock {
+    color: #ffffff;
+  }
+  [data-theme="light"] .mode-toggle.live .option-live {
+    color: #ffffff;
+  }

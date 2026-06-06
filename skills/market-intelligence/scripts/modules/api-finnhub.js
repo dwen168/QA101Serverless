@@ -1,5 +1,5 @@
 const config = require('../../../../backend/lib/config');
-const { safeNumber, resolveArticleSourceLabel } = require('./utils');
+const { safeNumber, resolveArticleSourceLabel, cleanCompanyName } = require('./utils');
 const { scoreSentimentsWithRules, scoreCompanyNewsWithLlm } = require('./sentiment');
 const { detectMacroTheme, MACRO_THEME_RULES } = require('./macro');
 
@@ -33,15 +33,23 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
     const ruleScoredNews = await Promise.all(ruleScoredNewsPromises);
 
     const companyName = context.companyName || `${ticker} Corp.`;
+    const cleanName = cleanCompanyName(companyName);
     const searchTerms = [
       ticker.toUpperCase(),
       ticker.split('.')[0].toUpperCase(),
-      ...(companyName.split(' ').slice(0, 3)),
     ];
+    if (cleanName) {
+      cleanName.split(' ').forEach(w => {
+        if (w.length > 1) searchTerms.push(w.toUpperCase());
+      });
+    }
+
     const relevantNews = ruleScoredNews.filter((news) => {
       const headline = (news.title || '').toUpperCase();
-      return searchTerms.some((term) => headline.includes(term.toUpperCase()));
+      return searchTerms.some((term) => headline.includes(term));
     });
+
+    const finalCandidates = relevantNews.length > 0 ? relevantNews : ruleScoredNews;
 
     if (relevantNews.length > 0) {
       const llmScored = await scoreCompanyNewsWithLlm(relevantNews, {
@@ -49,7 +57,7 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
         sector: context.sector,
         companyName: context.companyName,
       }, dependencies);
-      return ruleScoredNews.map((news) => {
+      return finalCandidates.map((news) => {
         const llmVersion = llmScored.find((n) => n.title === news.title);
         return llmVersion
           ? {
@@ -63,7 +71,7 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
       });
     }
 
-    return ruleScoredNews;
+    return finalCandidates;
   } catch (error) {
     console.error('Finnhub news fetch failed:', error.message);
     return null;

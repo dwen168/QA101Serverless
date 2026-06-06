@@ -107,9 +107,10 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
   let marketData, llmAnalysis, dataSource, usedFallback, fallbackReason;
   try {
     const skillStartedAt = performance.now();
+    const mode = typeof getDataMode === 'function' ? getDataMode() : 'mock';
     const r1 = await apiFetch(`${API_BASE}/skills/market-intelligence`, {
       method: 'POST', headers: getLlmHeaders(),
-      body: JSON.stringify({ ticker }),
+      body: JSON.stringify({ ticker, mode }),
     });
     const d1 = await readApiJson(r1);
     marketData = d1.marketData;
@@ -215,10 +216,11 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
   const loading = addLoadingMsg('⟳ Running portfolio-optimization skill...');
   try {
     const skillStartedAt = performance.now();
+    const mode = typeof getDataMode === 'function' ? getDataMode() : 'mock';
     const r = await apiFetch(`${API_BASE}/skills/portfolio-optimization`, {
       method: 'POST',
       headers: getLlmHeaders(),
-      body: JSON.stringify({ tickers, timeHorizon }),
+      body: JSON.stringify({ tickers, timeHorizon, mode }),
     });
     const d = await r.json();
     removeLoadingMsg();

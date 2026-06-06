@@ -64,4 +64,6 @@ module.exports = {
   authCookieName: String(process.env.AUTH_COOKIE_NAME || 'qb_auth'),
   authTokenTtlSec: parsePositiveInt(process.env.AUTH_TOKEN_TTL_SEC, 60 * 60 * 12),
   authUsers,
+  defaultFedPolicyBias: String(process.env.DEFAULT_FED_POLICY_BIAS || 'WATCH').toUpperCase(),
+  defaultRbaPolicyBias: String(process.env.DEFAULT_RBA_POLICY_BIAS || 'WATCH').toUpperCase(),
 };
