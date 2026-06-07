@@ -415,6 +415,7 @@ function createApp() {
         marketData: req.body.marketData,
         edaInsights: req.body.edaInsights,
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
+        multiAgent: req.body.multiAgent || false,
       });
       res.json(sanitizeResponsePayload(result));
     } catch (error) {

@@ -10,6 +10,7 @@ const { scoreSignals, scoreBacktestSnapshot } = require('./modules/scoring');
 const { buildDecisionTree } = require('./modules/decision-tree');
 const { runRecommendationBacktest } = require('./backtest');
 const { computeRiskMetrics } = require('./modules/risk');
+const { runMultiAgentRecommendation } = require('./modules/multi-agent');
 
 const skills = loadSkills();
 
@@ -42,7 +43,7 @@ function buildFallbackRecommendation(marketData, action, signals, confidence, bu
   };
 }
 
-async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = 'MEDIUM' }, dependencies = {}) {
+async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = 'MEDIUM', multiAgent = false }, dependencies = {}) {
   requireObject(marketData, 'marketData');
 
   const normalizedTimeHorizon = normalizeTimeHorizon(timeHorizon);
@@ -60,7 +61,45 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
   const { entry, stopLoss, takeProfit, riskReward, atr, varMetrics } = riskMetricsData;
 
   const llm = dependencies.callDeepSeek || callDeepSeek;
-  const systemPrompt = `You are a senior quantitative analyst. Synthesize signals and write a trade recommendation.
+
+  let llmRecommendation;
+  let confidenceExplanation;
+  let debate = null;
+  let finalAction = action;
+  let finalActionColor = actionColor;
+  let finalConfidence = confidence;
+  let finalEntry = entry;
+  let finalStopLoss = stopLoss;
+  let finalTakeProfit = takeProfit;
+
+  if (multiAgent) {
+    const multiAgentResult = await runMultiAgentRecommendation({
+      marketData,
+      timeHorizon,
+      profile,
+      signals,
+      score,
+      buyRatio,
+      policyOverlay,
+      eventRegimeOverlay,
+      entry,
+      stopLoss,
+      takeProfit,
+      riskReward,
+      llm,
+    });
+
+    finalAction = multiAgentResult.action;
+    finalActionColor = multiAgentResult.actionColor;
+    finalConfidence = multiAgentResult.confidence;
+    finalEntry = multiAgentResult.entry;
+    finalStopLoss = multiAgentResult.stopLoss;
+    finalTakeProfit = multiAgentResult.takeProfit;
+    llmRecommendation = multiAgentResult.llmRecommendation;
+    confidenceExplanation = multiAgentResult.confidenceExplanation;
+    debate = multiAgentResult.debate;
+  } else {
+    const systemPrompt = `You are a senior quantitative analyst. Synthesize signals and write a trade recommendation.
 
 Your task:
 1. Write a 'rationale' (2-3 sentences) explaining the recommendation based on investment objective and signals.
@@ -75,7 +114,7 @@ Return JSON ONLY. Format:
   "keyRisks": ["...", "..."],
   "executiveSummary": "..."
 }`;
-  const userMessage = `Write a trade recommendation for ${marketData.ticker}.
+    const userMessage = `Write a trade recommendation for ${marketData.ticker}.
 Investment objective: ${profile.label} (${profile.holdingPeriod}).
 Focus: ${profile.focus}.
 Action: ${action}.
@@ -90,30 +129,31 @@ Context:
 - Event Regime Overlay: ${JSON.stringify(eventRegimeOverlay || {}, null, 2)}
 - Fundamental Context: ${JSON.stringify({ pe: marketData.pe, eps: marketData.eps, marketCap: marketData.marketCap, analystConsensus: marketData.analystConsensus }, null, 2)}`;
 
-  // Run LLM calls in parallel
-  const [llmRecommendationResult, confidenceExplanation] = await Promise.all([
-    (async () => {
-      try {
-        const analysis = await llm(systemPrompt, userMessage);
-        return parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile));
-      } catch (error) {
-        console.warn(`[Trade Recommendation] Failed to generate rationale for ${marketData.ticker}:`, error.message);
-        return buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
-      }
-    })(),
+    const [llmRecommendationResult, confidenceExplanationResult] = await Promise.all([
+      (async () => {
+        try {
+          const analysis = await llm(systemPrompt, userMessage);
+          return parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile));
+        } catch (error) {
+          console.warn(`[Trade Recommendation] Failed to generate rationale for ${marketData.ticker}:`, error.message);
+          return buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
+        }
+      })(),
 
-    generateConfidenceExplanation({
-      llm,
-      ticker: marketData.ticker,
-      action,
-      confidence,
-      confidenceBreakdown,
-      signals,
-    }),
-  ]);
+      generateConfidenceExplanation({
+        llm,
+        ticker: marketData.ticker,
+        action,
+        confidence,
+        confidenceBreakdown,
+        signals,
+      }),
+    ]);
 
-  const llmRecommendation = llmRecommendationResult;
-  llmRecommendation.timeHorizon = normalizedTimeHorizon;
+    llmRecommendation = llmRecommendationResult;
+    llmRecommendation.timeHorizon = normalizedTimeHorizon;
+    confidenceExplanation = confidenceExplanationResult;
+  }
 
   // Historical pattern matching
   const historicalPatterns = findHistoricalPatterns(marketData.priceHistory, marketData);
@@ -127,8 +167,8 @@ Context:
   const decisionTree = buildDecisionTree({
     score,
     signals,
-    confidence,
-    action,
+    confidence: finalConfidence,
+    action: finalAction,
     macroOverlay,
     eventRegimeOverlay,
   });
@@ -136,20 +176,24 @@ Context:
   // Get weights metadata for transparency
   const weightsMetadata = getWeightsMetadata();
 
+  const calculatedRiskReward = finalEntry && finalStopLoss && finalTakeProfit && Math.abs(finalEntry - finalStopLoss) > 0
+    ? parseFloat(Math.abs((finalTakeProfit - finalEntry) / (finalEntry - finalStopLoss)).toFixed(2))
+    : riskReward;
+
   return {
     recommendation: {
       ticker: marketData.ticker,
-      action,
-      actionColor,
-      confidence,
+      action: finalAction,
+      actionColor: finalActionColor,
+      confidence: finalConfidence,
       confidenceExplanation,
-      confidenceBreakdown,
+      confidenceBreakdown: multiAgent ? null : confidenceBreakdown,
       score,
       signals,
-      entry,
-      stopLoss,
-      takeProfit,
-      riskReward,
+      entry: finalEntry,
+      stopLoss: finalStopLoss,
+      takeProfit: finalTakeProfit,
+      riskReward: calculatedRiskReward,
       objectiveProfile: {
         timeHorizon: profile.timeHorizon,
         label: profile.label,
@@ -169,6 +213,8 @@ Context:
       ...llmRecommendation,
       historicalPatterns,
       disclaimer: 'WARNING: For educational/demo purposes only. Not financial advice.',
+      multiAgent: !!multiAgent,
+      debate,
     },
     riskMetrics: {
       atr14: atr,

@@ -172,43 +172,177 @@ function renderRecommendation(rec, panel) {
     return `${n > 0 ? '+' : ''}${n}`;
   };
 
+  let headerHtml = '';
+  if (rec.multiAgent && rec.debate) {
+    const round1 = rec.debate.round1;
+    const round2 = rec.debate.round2;
+    const arbitration = rec.debate.arbitration;
+
+    headerHtml = `
+      <!-- Multi-Agent Consensus Arena Header -->
+      <div class="debate-arena-header">
+        <div class="debate-arena-title">🤖 Multi-Turn Committee Debate Arena</div>
+        <div class="debate-arena-subtitle">Technical vs Fundamental specialists cross-examine setup robustness</div>
+      </div>
+
+      <!-- ROUND 1: Opening Thesis -->
+      <div class="debate-round-header">
+        <span class="debate-round-number">ROUND 1</span>
+        <span class="debate-round-title">${round1.title}</span>
+      </div>
+
+      <div class="debate-arena-grid">
+        <!-- Technical Analyst Agent Column -->
+        <div class="debate-card bullish">
+          <div class="debate-card-header">
+            <span class="debate-agent-icon">🐂</span>
+            <span class="debate-agent-name">${round1.technicalAnalyst.name}</span>
+            <span class="debate-agent-badge pos">TECH FOCUS</span>
+          </div>
+          <div class="debate-card-body">
+            <p class="debate-analysis">${round1.technicalAnalyst.analysis}</p>
+            <div class="debate-bullets">
+              ${(round1.technicalAnalyst.drivers || []).map(d => `<div class="debate-bullet"><span class="bullet-icon">▲</span> ${d}</div>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <!-- Risk & Fundamental Analyst Agent Column -->
+        <div class="debate-card bearish">
+          <div class="debate-card-header">
+            <span class="debate-agent-icon">🐻</span>
+            <span class="debate-agent-name">${round1.riskAnalyst.name}</span>
+            <span class="debate-agent-badge neg">RISK/FUNDAMENTAL</span>
+          </div>
+          <div class="debate-card-body">
+            <p class="debate-analysis">${round1.riskAnalyst.analysis}</p>
+            <div class="debate-bullets">
+              ${(round1.riskAnalyst.risks || []).map(r => `<div class="debate-bullet"><span class="bullet-icon">▼</span> ${r}</div>`).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROUND 2: Rebuttals -->
+      <div class="debate-round-header">
+        <span class="debate-round-number">ROUND 2</span>
+        <span class="debate-round-title">${round2.title}</span>
+      </div>
+
+      <div class="debate-arena-grid">
+        <!-- Technical Analyst Rebuttal Column -->
+        <div class="debate-card bullish rebuttal-card">
+          <div class="debate-card-header">
+            <span class="debate-agent-icon">🐂</span>
+            <span class="debate-agent-name">${round2.technicalAnalyst.name}</span>
+            <span class="debate-agent-badge pos" style="opacity:0.7">REBUTTAL</span>
+          </div>
+          <div class="debate-card-body">
+            <p class="debate-analysis" style="font-style: italic">"${round2.technicalAnalyst.rebuttal}"</p>
+          </div>
+        </div>
+
+        <!-- Risk Analyst Rebuttal Column -->
+        <div class="debate-card bearish rebuttal-card">
+          <div class="debate-card-header">
+            <span class="debate-agent-icon">🐻</span>
+            <span class="debate-agent-name">${round2.riskAnalyst.name}</span>
+            <span class="debate-agent-badge neg" style="opacity:0.7">REBUTTAL</span>
+          </div>
+          <div class="debate-card-body">
+            <p class="debate-analysis" style="font-style: italic">"${round2.riskAnalyst.rebuttal}"</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ARBITRATION SECTOR -->
+      <div class="debate-flow-divider">
+        <div class="debate-flow-line"></div>
+        <div class="debate-flow-badge">⚖ Committee Verdict & Arbitration</div>
+        <div class="debate-flow-line"></div>
+      </div>
+
+      <!-- Decision Agent Card -->
+      <div class="debate-card decision">
+        <div class="debate-card-header">
+          <div style="display:flex; align-items:center; gap:8px">
+            <span class="debate-agent-icon">👑</span>
+            <span class="debate-agent-name">${arbitration.name} (Verdict)</span>
+          </div>
+          <span class="debate-agent-badge decision" style="background:${rec.actionColor}20; color:${rec.actionColor}; border: 1px solid ${rec.actionColor}40">${rec.action}</span>
+        </div>
+        <div class="debate-card-body">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; flex-wrap:wrap">
+            <div style="flex:1; min-width:240px">
+              <div class="debate-verdict-title" style="color:${rec.actionColor}; font-size:18px; font-weight:700">${rec.action}</div>
+              <div style="color:var(--text2); font-size:12px; margin-top:2px">${rec.ticker} · ${rec.confidence}% Confidence</div>
+              ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
+              <div style="width:180px; margin-top:6px">
+                <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
+              </div>
+            </div>
+            
+            <div style="text-align:right; flex-shrink:0">
+              <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
+              <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
+              <div style="margin-top:8px">
+                <button type="button" class="run-rec-backtest" data-ticker="${rec.ticker}" style="cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px;color:var(--text3);font-family:var(--mono)">Run strategy backtest</button>
+              </div>
+            </div>
+          </div>
+
+          <p class="debate-analysis" style="font-weight: 500; font-size:13px; line-height:1.65; color:var(--text2); border-left: 2px solid ${rec.actionColor}; padding-left: 10px; margin-bottom:12px">${arbitration.finalVerdict}</p>
+          
+          <div style="margin-top:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.015); border:1px solid var(--border)">
+            <div style="font-size:10px; font-family:var(--mono); text-transform:uppercase; color:var(--text3); margin-bottom:4px; letter-spacing:0.05em">Arbitration compromise rationale</div>
+            <p style="font-size:12px; color:var(--text2); margin:0; line-height:1.55">${arbitration.debateSummary}</p>
+          </div>
+        </div>
+      </div>
+    `;
+  } else {
+    headerHtml = `
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div class="rec-action" style="color:${rec.actionColor}">${rec.action}</div>
+          <div class="rec-confidence" style="color:var(--text2)">${rec.ticker} · ${rec.confidence}% Confidence</div>
+          ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
+          <div style="width:180px">
+            <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
+          </div>
+          ${confidenceBreakdown ? `
+            <details style="margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);max-width:420px">
+              <summary style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;list-style:none">Explain confidence (${rec.confidence}%)</summary>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+                <span class="detail-chip"><span>Base:</span>${confidenceBreakdown.base ?? '—'}</span>
+                <span class="detail-chip"><span>Consistency:</span>${fmtAdj(confidenceBreakdown.consistencyAdjustment)}</span>
+                <span class="detail-chip"><span>Conflict:</span>${fmtAdj(confidenceBreakdown.conflictPenalty)}</span>
+                <span class="detail-chip"><span>Signal count:</span>${fmtAdj(confidenceBreakdown.signalCountAdjustment)}</span>
+                <span class="detail-chip"><span>Macro:</span>${fmtAdj(confidenceBreakdown.macroAdjustment)}</span>
+                <span class="detail-chip"><span>Alignment:</span>${confidenceBreakdown.alignment ?? '—'}%</span>
+                <span class="detail-chip"><span>Final:</span>${confidenceBreakdown.final ?? rec.confidence}</span>
+              </div>
+              ${rec.confidenceExplanation ? `<div style="margin-top:8px;font-size:12px;line-height:1.5;color:var(--text2)">${rec.confidenceExplanation}</div>` : ''}
+            </details>
+          ` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
+          <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
+          <div style="margin-top:8px">
+            <button type="button" class="run-rec-backtest" data-ticker="${rec.ticker}" style="cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px;color:var(--text3);font-family:var(--mono)">Run strategy backtest</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   const recCard = document.createElement('div');
   recCard.className = 'rec-card fade-in';
   recCard.style.background = `linear-gradient(135deg, var(--bg2), ${rec.actionColor}15)`;
   recCard.style.borderColor = `${rec.actionColor}40`;
   recCard.innerHTML = `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px">
-      <div>
-        <div class="rec-action" style="color:${rec.actionColor}">${rec.action}</div>
-        <div class="rec-confidence" style="color:var(--text2)">${rec.ticker} · ${rec.confidence}% Confidence</div>
-        ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
-        <div style="width:180px">
-          <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
-        </div>
-        ${confidenceBreakdown ? `
-          <details style="margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);max-width:420px">
-            <summary style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;list-style:none">Explain confidence (${rec.confidence}%)</summary>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-              <span class="detail-chip"><span>Base:</span>${confidenceBreakdown.base ?? '—'}</span>
-              <span class="detail-chip"><span>Consistency:</span>${fmtAdj(confidenceBreakdown.consistencyAdjustment)}</span>
-              <span class="detail-chip"><span>Conflict:</span>${fmtAdj(confidenceBreakdown.conflictPenalty)}</span>
-              <span class="detail-chip"><span>Signal count:</span>${fmtAdj(confidenceBreakdown.signalCountAdjustment)}</span>
-              <span class="detail-chip"><span>Macro:</span>${fmtAdj(confidenceBreakdown.macroAdjustment)}</span>
-              <span class="detail-chip"><span>Alignment:</span>${confidenceBreakdown.alignment ?? '—'}%</span>
-              <span class="detail-chip"><span>Final:</span>${confidenceBreakdown.final ?? rec.confidence}</span>
-            </div>
-            ${rec.confidenceExplanation ? `<div style="margin-top:8px;font-size:12px;line-height:1.5;color:var(--text2)">${rec.confidenceExplanation}</div>` : ''}
-          </details>
-        ` : ''}
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
-        <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
-        <div style="margin-top:8px">
-          <button type="button" class="run-rec-backtest" data-ticker="${rec.ticker}" style="cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px;color:var(--text3);font-family:var(--mono)">Run strategy backtest</button>
-        </div>
-      </div>
-    </div>
+    ${headerHtml}
 
     <div class="price-targets">
       <div class="target-item">

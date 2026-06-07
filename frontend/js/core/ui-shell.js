@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initialize data mode from localStorage
   const savedMode = getDataMode();
   setDataMode(savedMode);
+
+  // Initialize multi-agent mode from localStorage
+  const savedMultiAgent = getMultiAgentMode();
+  setMultiAgentMode(savedMultiAgent);
 });
 
 function escapeHtml(value) {
@@ -141,7 +145,7 @@ function setDataMode(mode) {
 }
 
 function getDataMode() {
-  return localStorage.getItem('quantbot.dataMode') || 'mock';
+  return localStorage.getItem('quantbot.dataMode') || 'live';
 }
 
 function toggleDataMode() {
@@ -150,6 +154,34 @@ function toggleDataMode() {
   setDataMode(nextMode);
 }
 
+function setMultiAgentMode(mode) {
+  const toggle = document.getElementById('multi-agent-toggle');
+  if (!toggle) return;
+
+  if (mode === 'on') {
+    toggle.classList.remove('off');
+    toggle.classList.add('on');
+    localStorage.setItem('quantbot.multiAgent', 'on');
+  } else {
+    toggle.classList.remove('on');
+    toggle.classList.add('off');
+    localStorage.setItem('quantbot.multiAgent', 'off');
+  }
+}
+
+function getMultiAgentMode() {
+  return localStorage.getItem('quantbot.multiAgent') || 'off';
+}
+
+function toggleMultiAgentMode() {
+  const current = getMultiAgentMode();
+  const nextMode = current === 'on' ? 'off' : 'on';
+  setMultiAgentMode(nextMode);
+}
+
 window.setDataMode = setDataMode;
 window.getDataMode = getDataMode;
 window.toggleDataMode = toggleDataMode;
+window.setMultiAgentMode = setMultiAgentMode;
+window.getMultiAgentMode = getMultiAgentMode;
+window.toggleMultiAgentMode = toggleMultiAgentMode;

@@ -161,9 +161,10 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
   const l3 = addLoadingMsg('⟳ Running recommendation engine...');
   const skillStartedAt3 = performance.now();
   try {
+    const multiAgent = typeof getMultiAgentMode === 'function' ? getMultiAgentMode() === 'on' : false;
     const r3 = await apiFetch(`${API_BASE}/skills/trade-recommendation`, {
       method: 'POST', headers: getLlmHeaders(),
-      body: JSON.stringify({ marketData, edaInsights, timeHorizon }),
+      body: JSON.stringify({ marketData, edaInsights, timeHorizon, multiAgent }),
     });
     const d3 = await readApiJson(r3);
     rec = d3.recommendation;

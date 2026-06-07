@@ -49,6 +49,14 @@
           <div class="mode-toggle-slider"></div>
         </div>
       </div>
+      <div class="mode-switch-container" id="multi-agent-container">
+        <span class="mode-switch-label">Multi-Agent</span>
+        <div class="mode-toggle off" id="multi-agent-toggle" onclick="toggleMultiAgentMode()" role="button" tabindex="0" aria-label="Toggle Multi-Agent Mode">
+          <span class="mode-toggle-option option-off">Off</span>
+          <span class="mode-toggle-option option-on">On</span>
+          <div class="mode-toggle-slider"></div>
+        </div>
+      </div>
       <div class="llm-switcher">
         <span class="llm-switcher-label">LLM</span>
         <select id="llm-provider" class="llm-provider-select" onchange="handleLlmProviderChange()">
