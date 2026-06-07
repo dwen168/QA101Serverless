@@ -76,10 +76,11 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   const aboveMa200 = ma200 != null && p > ma200;
   const ma50AboveMa200 = ma50 != null && ma200 != null && ma50 > ma200;
 
-  // Strong uptrend: price above both MAs *and* MAs aligned *and* MACD bullish
-  const strongUptrend = aboveMa50 && aboveMa200 && ma50AboveMa200 && macdBullish;
-  // Strong downtrend: price below both MAs *and* MAs aligned downward *and* MACD bearish
-  const strongDowntrend = !aboveMa50 && !aboveMa200 && !ma50AboveMa200 && macdBearish;
+  // Strong uptrend: price above both MAs *and* MAs aligned — MACD intentionally excluded here
+  // so that MACD only scores once as its own independent signal (Fix 3: remove MACD dual role).
+  const strongUptrend = aboveMa50 && aboveMa200 && ma50AboveMa200;
+  // Strong downtrend: price below both MAs *and* MAs aligned downward
+  const strongDowntrend = !aboveMa50 && !aboveMa200 && !ma50AboveMa200;
   // Moderate uptrend: price above MA50 and MA50 > MA200 (but MACD may be neutral)
   const moderateUptrend = aboveMa50 && ma50AboveMa200;
   // Moderate downtrend: price below MA50 and MA50 < MA200
@@ -309,6 +310,19 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       ], 'macro');
     }
 
+    let hasUnifiedCpiPressure = false;
+    const isAsx = marketData.ticker && typeof marketData.ticker === 'string' && marketData.ticker.toUpperCase().endsWith('.AX');
+    const indicators = macro.macroIndicators;
+    
+    if (isAsx && indicators && indicators.available && indicators.cpi !== null && indicators.cpi > 3.0) {
+      hasUnifiedCpiPressure = true;
+      // Single consolidated signal for CPI inflation pressure
+      add('Macro CPI Inflation Pressure', macroWeight('macro_sector_headwind', -1), `ABS CPI is high at ${indicators.cpi}%, driving RBA policy tightening bias and rate headwinds.`, [
+        { label: 'CPI inflation', value: `${indicators.cpi}%` },
+        { label: 'RBA Target', value: '2.0-3.0%' }
+      ], 'macro');
+    }
+
     if (policyOverlay.available && Math.abs(policyOverlay.netBias) >= 0.2) {
       const magnitude = Math.min(1.5, Math.max(0.4, Math.abs(policyOverlay.netBias)));
       const drivers = policyOverlay.banks
@@ -325,26 +339,41 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
           { label: 'Drivers', value: drivers || 'FED/RBA' },
         ], 'macro');
       } else {
-        const rawPoints = macroWeight('macro_sector_headwind', -1) * magnitude;
-        const points = Math.min(-0.5, rawPoints);
-        add('Central Bank Policy Headwind', points, policyOverlay.summary, [
-          { label: 'Sector', value: policyOverlay.sector },
-          { label: 'Bias', value: fmt(policyOverlay.netBias, 2) },
-          { label: 'Drivers', value: drivers || 'FED/RBA' },
-        ], 'macro');
+        // Fix 1: If CPI pressure already triggered RBA-driven headwind score, adjust netBias / points to avoid double-scoring the RBA part of the headwind.
+        // We only score the remaining portion of policy headwind (e.g. Fed tightening or non-CPI factors) if CPI was already captured.
+        let adjustedNetBias = policyOverlay.netBias;
+        let finalSummary = policyOverlay.summary;
+        let finalDrivers = drivers;
+        
+        if (hasUnifiedCpiPressure) {
+          // Find if RBA bias was tightening and contributed to the negative netBias
+          const rbaEntry = policyOverlay.banks.find(b => b.bank === 'RBA');
+          if (rbaEntry && rbaEntry.biasScore < 0) {
+            // Subtract/neutralize the RBA component since it's already counted in Macro CPI Inflation Pressure
+            adjustedNetBias -= rbaEntry.biasScore; 
+            finalDrivers = policyOverlay.banks
+              .filter((item) => item.bank !== 'RBA' && Math.abs(item.biasScore) >= 0.2)
+              .map((item) => `${item.bank} ${item.bias}`)
+              .join(', ');
+            finalSummary = `Excluding RBA CPI-tightening (scored separately), policy bias net score is ${fmt(adjustedNetBias, 2)}.`;
+          }
+        }
+        
+        if (Math.abs(adjustedNetBias) >= 0.2 && adjustedNetBias < 0) {
+          const rawPoints = macroWeight('macro_sector_headwind', -1) * Math.min(1.5, Math.max(0.4, Math.abs(adjustedNetBias)));
+          const points = Math.min(-0.5, rawPoints);
+          add('Central Bank Policy Headwind', points, finalSummary, [
+            { label: 'Sector', value: policyOverlay.sector },
+            { label: 'Bias', value: fmt(adjustedNetBias, 2) },
+            { label: 'Drivers', value: finalDrivers || 'FED' },
+          ], 'macro');
+        }
       }
     }
 
     // Australian Macro Indicators (ABS / RBA)
-    const isAsx = marketData.ticker && typeof marketData.ticker === 'string' && marketData.ticker.toUpperCase().endsWith('.AX');
-    const indicators = macro.macroIndicators;
     if (isAsx && indicators && indicators.available) {
-      if (indicators.cpi !== null && indicators.cpi > 3.0) {
-        add('High CPI Inflation (ABS)', macroWeight('macro_sector_headwind', -1), `ABS inflation is high at ${indicators.cpi}%, putting pressure on interest rates and valuations.`, [
-          { label: 'CPI inflation', value: `${indicators.cpi}%` },
-          { label: 'Threshold', value: '3.0%' }
-        ], 'macro');
-      }
+      // indicators.cpi is handled above via hasUnifiedCpiPressure
       if (indicators.unemploymentRate !== null && indicators.unemploymentRate < 4.0) {
         add('Tight Labor Market (ABS)', macroWeight('macro_risk_bullish', 1), `ABS unemployment is low at ${indicators.unemploymentRate}%, showing strong economic demand.`, [
           { label: 'Unemployment', value: `${indicators.unemploymentRate}%` },
@@ -465,11 +494,9 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       ], 'eda');
     }
 
-    if (edaFactors.volumeRegime === 'HIGH' && (marketData.changePercent || 0) > 0) {
-      add('EDA Volume Confirmation', w('eda_volume_bullish') || 0.5, 'Up move is supported by high volume participation.', [
-        { label: 'VolumeRatio', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
-      ], 'eda');
-    }
+    // Fix 4: Double volume scoring removed. We retain OBV (On-Balance Volume) signal under technical indicators
+    // and skip EDA Volume Confirmation here.
+
 
     if (edaFactors.volatilityRegime === 'HIGH') {
       add('EDA Volatility Risk', w('eda_volatility_bearish') || -0.5, 'High realized volatility increases execution risk.', [
@@ -477,12 +504,15 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       ], 'eda');
     }
 
-    if (edaFactors.trendStrengthSignal === 'STRONG_UP') {
-      add('EDA Trend Strength', w('eda_trend_strength') || 0.5, 'MA20 is meaningfully above MA50.', [
+    // Fix 2: EDA Trend Strength only fires when the MA50 trend signal was NOT already triggered.
+    // Prevents triple-counting: Price>MA50 (+1.231) + Price>MA200 (+1.812) + EDA Trend Strength (+0.5)
+    // all pointing at the same underlying moving-average alignment.
+    if (edaFactors.trendStrengthSignal === 'STRONG_UP' && !aboveMa50) {
+      add('EDA Trend Strength', w('eda_trend_strength') || 0.5, 'MA20 is meaningfully above MA50 (no MA50 price signal active).', [
         { label: 'TrendGap', value: `+${fmt(edaFactors.trendStrengthPct, 2)}%` },
       ], 'eda');
-    } else if (edaFactors.trendStrengthSignal === 'STRONG_DOWN') {
-      add('EDA Trend Weakness', w('eda_trend_weakness') || -0.5, 'MA20 is meaningfully below MA50.', [
+    } else if (edaFactors.trendStrengthSignal === 'STRONG_DOWN' && aboveMa50) {
+      add('EDA Trend Weakness', w('eda_trend_weakness') || -0.5, 'MA20 is meaningfully below MA50 (no bearish MA50 price signal active).', [
         { label: 'TrendGap', value: `${fmt(edaFactors.trendStrengthPct, 2)}%` },
       ], 'eda');
     }
@@ -606,19 +636,27 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   }
 
   // Daily momentum signals
-  const chg = marketData.changePercent;
-  if (chg > 1.5) {
-    add('Strong Daily Momentum', w('momentum_strong_up'), `Up ${fmt(chg, 1)}% today`, [
-      { label: 'Change', value: `+${fmt(chg, 2)}%` },
-      { label: 'Price Δ', value: `+$${fmt(marketData.change, 2)}` },
-      { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
-    ], 'momentum');
-  } else if (chg < -2) {
-    add('Bearish Day', w('momentum_strong_down'), `Down ${fmt(Math.abs(chg), 1)}% today`, [
-      { label: 'Change', value: `${fmt(chg, 2)}%` },
-      { label: 'Price Δ', value: `$${fmt(marketData.change, 2)}` },
-      { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
-    ], 'momentum');
+  // Fix 5: If an EDA Breakout is active, suppress the short-term Daily Momentum signals to avoid double-counting.
+  const hasActiveBreakout = edaFactors.available && (edaFactors.breakoutSignal === 'BULLISH_BREAKOUT' || edaFactors.breakoutSignal === 'BEARISH_BREAKDOWN');
+  
+  if (!hasActiveBreakout) {
+    const chg = marketData.changePercent;
+    if (chg > 1.5) {
+      add('Strong Daily Momentum', w('momentum_strong_up'), `Up ${fmt(chg, 1)}% today`, [
+        { label: 'Change', value: `+${fmt(chg, 2)}%` },
+        { label: 'Price Δ', value: `+$${fmt(marketData.change, 2)}` },
+        { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
+      ], 'momentum');
+    } else if (chg < -2) {
+      add('Bearish Day', w('momentum_strong_down'), `Down ${fmt(Math.abs(chg), 1)}% today`, [
+        { label: 'Change', value: `${fmt(chg, 2)}%` },
+        { label: 'Price Δ', value: `$${fmt(marketData.change, 2)}` },
+        { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
+      ], 'momentum');
+    }
+  } else {
+    // Record log/trace that momentum is suppressed due to breakout
+    // (doesn't output via add() to avoid adding points, but helps auditability)
   }
 
   // Technical Indicators scoring (if available)

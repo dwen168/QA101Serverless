@@ -396,12 +396,14 @@
 
         <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
           <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
-            <div style="font-family:var(--mono);font-size:11px;color:var(--amber);margin-bottom:8px">D. OVERLAYS</div>
-            <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2);line-height:1.55">
-              <li>Event-regime overlay adds sector-aware bias for war, oil, supply-chain, and rate-cycle regimes.</li>
-              <li>Policy overlay adds FED/RBA tailwind or headwind signals.</li>
-              <li>Macro anchors validate context with CL=F, ^TNX, and ^VIX.</li>
-              <li>EDA overlay adds breakout, volume, volatility, and trend-strength signals.</li>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--amber);margin-bottom:8px">D. OVERLAYS & ANTI-DOUBLE COUNTING</div>
+            <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--text2);line-height:1.5">
+              <li><strong>Unified CPI:</strong> Consolidates RBA and ABS CPI inflation. If CPI > 3%, it triggers <code>Macro CPI Inflation Pressure</code> and neutralizes RBA bias from policy headwinds.</li>
+              <li><strong>MA Guard:</strong> Skips <code>EDA Trend Strength</code> if the primary <code>Price > MA50</code> signal has already triggered.</li>
+              <li><strong>MACD Decoupling:</strong> RSI boundaries adapt purely on MA alignment and EDA volatility; MACD only scores independently.</li>
+              <li><strong>OBV Volume:</strong> Volume confirmation relies solely on OBV; redundant EDA Volume metrics are removed.</li>
+              <li><strong>Breakout Guard:</strong> Active <code>EDA Breakout</code> suppresses short-term <code>Daily Momentum</code> to prevent single-candle over-scoring.</li>
+              <li><strong>Event Regime & Anchors:</strong> Adds sector-aware bias for war/oil regimes, validated against oil (CL=F), yields (^TNX), and VIX.</li>
             </ul>
           </div>
 

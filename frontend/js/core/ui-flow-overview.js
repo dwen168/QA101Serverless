@@ -38,18 +38,19 @@
       footnote: 'High-level view only: these are representative signal groups, not a complete or stable contract of every scoring feature.'
     },
     step3: {
-      title: 'STEP 3 · Risk Overlay',
-      subtitle: 'Controls that prevent overconfident calls',
+      title: 'STEP 3 · Risk & Anti-Double Ingestion Overlay',
+      subtitle: 'Controls that prevent overconfident and inflated calls',
       html: `
-        <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;color:var(--text2);font-size:12px;line-height:1.5">
-          <li><strong style="color:var(--text)">Volatility Regime Penalty</strong> lowers score during elevated VIX environments.</li>
-          <li><strong style="color:var(--text)">Macro Conflict Check</strong> penalizes bullish calls under tightening-rate stress.</li>
-          <li><strong style="color:var(--text)">Tug-of-War Filter</strong> dampens output when bull/bear factors strongly conflict.</li>
-          <li><strong style="color:var(--text)">Confidence Calibration</strong> scales confidence using signal consistency, factor conflict, and regime quality checks.</li>
-          <li><strong style="color:var(--text)">Risk Budgeting</strong> avoids aggressive bias when downside tail-risk is high.</li>
+        <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px;color:var(--text2);font-size:12px;line-height:1.45">
+          <li><strong style="color:var(--text)">Consolidated CPI Inflation:</strong> Merges ABS CPI and RBA monetary policy into a single <code>Macro CPI Inflation Pressure</code> signal to avoid double penalty.</li>
+          <li><strong>Moving Average Guard:</strong> Skips <code>EDA Trend Strength</code> if the primary <code>Price > MA50</code> signal already captured the trend.</li>
+          <li><strong>MACD Decoupling:</strong> Isolates MACD so it does not affect the adaptive RSI threshold boundaries.</li>
+          <li><strong>OBV Volume Consensus:</strong> Retains <code>OBV Rising/Falling</code> as the single volume direction score, removing duplicate EDA Volume metrics.</li>
+          <li><strong>Breakout Guard:</strong> Suppresses short-term <code>Daily Momentum</code> when an active <code>EDA Breakout</code> is triggered.</li>
+          <li><strong style="color:var(--text)">Confidence & Volatility Overlays:</strong> Computes stops/targets via ATR, applies VaR downside metrics, and dampens score during extreme volatility.</li>
         </ul>
       `,
-      footnote: 'High-level view only: the live implementation mixes explicit overlays with confidence heuristics and risk metrics.'
+      footnote: 'Anti-double counting rules and risk overlay metrics are executed directly within the signal calculation engine (scoring.js).'
     },
     step4: {
       title: 'STEP 4 · Final Scoring',
