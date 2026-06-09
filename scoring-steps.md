@@ -837,7 +837,7 @@ When the `multiAgent` option is enabled, the raw quantitative recommendation (fr
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ LAYER 1        LAYER 2         LAYER 3        LAYER 4         LAYER 5       │
 │ Analyst Team → Researcher  →  Trade Agent  → Risk Committee → Decision Mgr  │
-│ (Parallel)     Plan           Proposal       (3-way debate)   (Final & Check)│
+│ (Parallel)     Plan           Proposal       (Parallel Veto)  (Final & Check)│
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -848,31 +848,37 @@ Four domain-specific sub-agents analyze isolated subsets of the market data. The
 * **Sentiment Analyst**: Evaluates news sentiment scores, short interest metrics, and insider buying/selling volume.
 * **News & Macro Analyst**: Evaluates macro risk level, dominant CPI/unemployment indicators, interest rate bias (Policy Overlay), and macro sector tailwinds/headwinds.
 
-### 2. Layer 2: Researcher Team (Debate Loop)
-To prevent single-agent confirmation bias and one-sided views, Layer 2 executes a structured multi-turn debate loop:
-* **Bull Researcher (Argument)**: Focuses strictly on building the strongest possible bullish case using Layer 1 analyst evidence (e.g. price breakouts, strong sentiment, earnings beats).
-* **Bear Researcher (Rebuttal)**: Directly counters the bull argument using bearish evidence (e.g. stretched valuations, technical overhead resistance, high macro risk).
-* **Bull Researcher (Counter-Rebuttal)**: Rebuts the bear case to stress-test their warnings.
-* **Lead Researcher Synthesis**: Summarizes the entire debate transcript and outputs the final **Investment Plan** with a specific conviction level (`HIGH`, `MEDIUM`, `LOW`) and key reasons.
+### 2. Layer 2: Researcher Team (Parallel Debate Loop)
+To prevent single-agent confirmation bias and one-sided views, Layer 2 executes a structured parallel debate:
+* **Step 1: Opening Arguments (Parallel)**:
+  - **Bull Researcher (Argument)**: Builds a bullish case relying strictly on evidence from Layer 1 analyst reports.
+  - **Bear Researcher (Argument)**: Builds a bearish case relying strictly on evidence from Layer 1 analyst reports.
+* **Step 2: Rebuttals (Parallel)**:
+  - **Bull Rebuttal**: Directly counters the Bear opening argument.
+  - **Bear Rebuttal**: Directly counters the Bull opening argument.
+* **Step 3: Synthesis**:
+  - **Lead Researcher Synthesis**: Synthesizes the debate and outputs the final **Investment Plan** with an explicit market `stance` (`bullish`, `neutral`, `bearish`), a `conviction` level (`HIGH`, `MEDIUM`, `LOW`), and key reasons.
 
 ### 3. Layer 3: Trade Agent
-Translates the researcher plan and factual analyst summaries into a concrete **Trade Proposal**. It proposes the target Action (`STRONG BUY` to `STRONG SELL`), suggested Position Sizing (`Full`, `Half`, `Quarter`, `None`), and precise price targets (Entry, Stop Loss, Exit).
+Translates the researcher plan (specifically utilizing the explicit stance) and factual analyst summaries into a concrete **Trade Proposal**. It proposes the target Action (`STRONG BUY` to `STRONG SELL`), suggested Position Sizing (`Full`, `Half`, `Quarter`, `None`), and precise price targets (Entry, Stop Loss, Exit).
 
 ### 4. Layer 4: Risk Management Team
-Simulates a three-party committee review:
-* **Aggressive Risk Analyst**: Promotes return optimization and catalysts, validating risk-taking arguments.
-* **Conservative Risk Analyst**: Highlights drawdown risk, stop-loss invalidation, and macro tail risks.
-* **Neutral Risk Analyst**: Reconciles the debate and outputs a revised, risk-adjusted proposal.
+Executes independent, parallel analysis with programmatic veto rules:
+* **Three Perspectives (Parallel)**:
+  - **Aggressive Risk Analyst**: Validates return catalysts and risk-taking opportunities.
+  - **Conservative Risk Analyst**: Highlights drawdown boundaries and macro downside tails.
+  - **Neutral Risk Analyst**: Evaluates baseline risk factors and position sizing guidelines.
+* **Programmatic Veto Rule**: Runs the three analysis pipelines concurrently. If 2 out of the 3 perspectives flag a "HIGH" risk level, a programmatic veto is triggered, overriding the trade proposal to force a risk-downgrade action.
 
 ### 5. Layer 5: Decision Manager
 Acts as the Committee Chair to finalize the trade consensus, confidence score (0-100), executive summary, and key risks.
 
 ### Quantitative Alignment Check
-The Decision Manager performs a strict comparison between the final LLM recommendation and the Stage 7 quantitative recommendation:
+The Decision Manager performs a comparison between the final LLM recommendation and the Stage 7 quantitative recommendation:
 * **Aligned (Green Light)**: If the LLM action matches the quantitative model's recommendation, the UI renders a green success banner: *"Quantitative Alignment — AI Decision Manager and quantitative scoring engine are in full agreement."*
-* **Discrepancy (Orange/Red Alert)**: If they mismatch (e.g. LLM overrides a BUY to HOLD/SELL), the UI displays a warning banner: *"Quant Discrepancy Detected"*, accompanied by the Decision Manager's specific explanation (`quantMismatchConcern`) detailing why the AI disagreed with the mathematical scoring signals.
+* **Discrepancy (Orange/Red Alert)**: If they mismatch, the quantitative recommendation is **not overridden** (preserving mathematical authority). Instead, the quantitative recommendation remains the primary action, and the LLM's disagreement is presented as an advisory note warning banner: *"Quant Discrepancy Detected"*, accompanied by the Decision Manager's specific explanation (`quantMismatchConcern`) detailing why the AI disagreed with the scoring engine.
 
 ---
 
-*Last updated: 2026-06-09 · Model calibration: v2.1-timeseries-horizon-calibrated*
+*Last updated: 2026-06-10 · Model calibration: v2.2-parallel-debate-calibrated*
 

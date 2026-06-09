@@ -74,8 +74,15 @@ async function runMultiAgentRecommendation({
     llm
   });
 
+  const quantMismatch = !!decisionResult.quantMismatch;
+
+  // If quantMismatch is true, do not overwrite the quantitative results. Keep quant parameters.
+  const finalAction = quantMismatch ? (quantAction || 'HOLD') : (decisionResult.action || quantAction || 'HOLD');
+  const finalEntry = quantMismatch ? entry : (typeof decisionResult.entry === 'number' ? decisionResult.entry : entry);
+  const finalStopLoss = quantMismatch ? stopLoss : (typeof decisionResult.stopLoss === 'number' ? decisionResult.stopLoss : stopLoss);
+  const finalTakeProfit = quantMismatch ? takeProfit : (typeof decisionResult.exit === 'number' ? decisionResult.exit : takeProfit);
+
   // Determine action color for frontend display
-  const finalAction = decisionResult.action || quantAction || 'HOLD';
   let finalActionColor = '#f59e0b';
   const upperVerdict = String(finalAction).toUpperCase();
   if (upperVerdict.includes('STRONG BUY')) finalActionColor = '#10b981';
@@ -87,15 +94,15 @@ async function runMultiAgentRecommendation({
     action: finalAction,
     actionColor: finalActionColor,
     confidence: typeof decisionResult.confidence === 'number' ? decisionResult.confidence : 50,
-    entry: typeof decisionResult.entry === 'number' ? decisionResult.entry : entry,
-    stopLoss: typeof decisionResult.stopLoss === 'number' ? decisionResult.stopLoss : stopLoss,
-    takeProfit: typeof decisionResult.exit === 'number' ? decisionResult.exit : takeProfit,
+    entry: finalEntry,
+    stopLoss: finalStopLoss,
+    takeProfit: finalTakeProfit,
     llmRecommendation: {
       rationale: decisionResult.rationale,
       keyRisks: decisionResult.keyRisks || ['Market volatility'],
       executiveSummary: decisionResult.executiveSummary,
       timeHorizon,
-      quantMismatch: !!decisionResult.quantMismatch,
+      quantMismatch,
       quantMismatchConcern: decisionResult.quantMismatchConcern || ''
     },
     confidenceExplanation: 'Confidence calibrated by Committee Decision Manager.',
@@ -120,7 +127,9 @@ async function runMultiAgentRecommendation({
         aggressive: riskManagementResult.aggressiveRisk,
         conservative: riskManagementResult.conservativeRisk,
         neutral: riskManagementResult.neutralRisk,
-        adjusted: riskManagementResult.riskAdjustedProposal
+        adjusted: riskManagementResult.riskAdjustedProposal,
+        vetoTriggered: riskManagementResult.vetoTriggered,
+        highRiskCount: riskManagementResult.highRiskCount
       },
       layer5: {
         title: 'Layer 5 · Decision Manager Verdict',

@@ -116,27 +116,27 @@
         <div style="display:flex;flex-direction:column;gap:10px">
           <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
             <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 1: Analysts (Fundamental & Technical)</strong>
-            <span style="font-size:11.5px;color:var(--text2)">Independent agents process underlying indicators, news sentiment, and sector data.</span>
+            <span style="font-size:11.5px;color:var(--text2)">Independent analysts process underlying indicators, news sentiment, and macro context.</span>
           </div>
           <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
-            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 2: Bull vs. Bear Research Debate</strong>
-            <span style="font-size:11.5px;color:var(--text2)">A multi-turn structured debate loop to mitigate LLM confirmation bias and hallucinations.</span>
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 2: Parallel Research Debate</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Structured parallel opening arguments and rebuttals (Bull vs Bear) to stress-test consensus and produce a unified stance.</span>
           </div>
           <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
             <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 3: Trader Proposal</strong>
-            <span style="font-size:11.5px;color:var(--text2)">Formulates positioning strategies, target stop-losses, and profit-taking levels.</span>
+            <span style="font-size:11.5px;color:var(--text2)">Translates research stance into actionable entry, stop-loss, and exit targets.</span>
           </div>
           <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
-            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 4: Risk Committee</strong>
-            <span style="font-size:11.5px;color:var(--text2)">Subjects the proposal to macroeconomic constraints, volatility caps, and sector risks.</span>
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 4: Risk Committee Veto</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Three parallel perspectives (Conservative, Aggressive, Neutral) evaluate risk. Programmatic 2/3 veto downgrades sizing.</span>
           </div>
           <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
-            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 5: Decision Manager Verdict & Alignment</strong>
-            <span style="font-size:11.5px;color:var(--text2)">Synthesizes the committee's output and evaluates alignment against the quantitative score. A warning banner triggers on divergence.</span>
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 5: Decision Manager & Preserved Quant Verdict</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Finalizes trade consensus. If mismatch occurs, the baseline quantitative verdict is preserved as primary recommendation, showing LLM alerts only as advisory warning.</span>
           </div>
         </div>
       `,
-      footnote: 'Multi-Agent Mode is currently experimental and disabled by default. Industry standards prioritize quantitative models over multi-turn agent execution due to response latency and token overhead.'
+      footnote: 'Multi-Agent Mode is currently experimental. Under disagreement, quantitative mathematical authority is preserved while AI consensus flags advisory warnings.'
     }
   };
 

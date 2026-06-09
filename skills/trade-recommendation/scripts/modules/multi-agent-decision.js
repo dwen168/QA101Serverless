@@ -11,6 +11,12 @@ async function runDecisionManager({
 }) {
   const decisionSystemPrompt = `You are the Decision Manager (Investment Committee Chair).
 Your task is to review the entire 5-layer investment committee progress and deliver the final trade verdict.
+The Researcher Team has decided the overall stance for this trade is "${researcherPlan.stance || 'neutral'}".
+You MUST align your Action with this stance:
+- If stance is "bullish", Action must be BUY or STRONG BUY.
+- If stance is "bearish", Action must be SELL or STRONG SELL.
+- If stance is "neutral", Action must be HOLD.
+
 Inputs include:
 - Analyst reports (Fundamental, Sentiment, News, Technical)
 - Researcher Investment Plan
@@ -40,6 +46,7 @@ LAYER 1 ANALYSTS:
 - News: ${analystReports.news.analysis}
 
 LAYER 2 RESEARCH PLAN:
+- Stance: ${researcherPlan.stance}
 - Conviction: ${researcherPlan.conviction}
 - Summary: ${researcherPlan.investmentPlan}
 
@@ -54,7 +61,7 @@ LAYER 4 RISK DEBATE & ADJUSTED PROPOSAL:
 - Neutral: ${riskManagementResult.neutralRisk}
 - Risk-Adjusted Proposal: ${JSON.stringify(riskManagementResult.riskAdjustedProposal)}`;
 
-  const defaultAction = quantAction || 'HOLD';
+  const defaultAction = researcherPlan.stance === 'bullish' ? 'BUY' : (researcherPlan.stance === 'bearish' ? 'SELL' : 'HOLD');
 
   try {
     const res = await llm(decisionSystemPrompt, inputContext);

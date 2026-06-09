@@ -1652,8 +1652,11 @@
     --text3: #6b7280;
     --cyan: #2563eb;
     --cyan-dim: rgba(37, 99, 235, 0.09);
+    --green: #059669;
     --green-dim: rgba(5, 150, 105, 0.09);
+    --red: #dc2626;
     --red-dim: rgba(220, 38, 38, 0.09);
+    --amber: #d97706;
     --amber-dim: rgba(217, 119, 6, 0.09);
     --shadow-sm: 0 1px 2px rgba(15,23,42,0.04);
     --shadow-md: 0 8px 24px rgba(15,23,42,0.06);
@@ -2162,4 +2165,89 @@
   }
   .rebuttal-card .debate-analysis {
     margin-bottom: 0;
+  }
+
+  /* ── Multi-Agent Advisory Card ── */
+  .multi-agent-advisory {
+    grid-column: 1 / span 2;
+    border: 1px solid rgba(245,158,11,0.22) !important;
+    background: radial-gradient(circle at top right, rgba(245,158,11,0.08), transparent 35%), linear-gradient(180deg, rgba(24,18,12,0.98), rgba(16,11,8,0.94));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .advisory-badge {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(245,158,11,0.3);
+    background: rgba(245,158,11,0.1);
+    color: #fef08a;
+    font-size: 10px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .advisory-title {
+    margin-top: 6px;
+    font-size: 16px;
+    color: var(--amber);
+    letter-spacing: -0.02em;
+  }
+  .advisory-desc {
+    margin-top: 2px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--text2);
+  }
+  .advisory-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .advisory-item {
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.05);
+    background: rgba(255,255,255,0.02);
+  }
+  .advisory-item-label {
+    display: block;
+    font-size: 9px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    color: var(--amber);
+    margin-bottom: 4px;
+  }
+  .advisory-item-desc {
+    font-size: 11px;
+    color: var(--text2);
+    line-height: 1.4;
+    display: block;
+  }
+
+  /* Light theme overrides for Advisory card */
+  [data-theme="light"] .multi-agent-advisory {
+    background: radial-gradient(circle at top right, rgba(217,119,6,0.06), transparent 35%), linear-gradient(180deg, #fefefe, #f1f5f9);
+    border-color: rgba(217,119,6,0.3) !important;
+  }
+  [data-theme="light"] .advisory-badge {
+    border-color: rgba(217,119,6,0.3);
+    background: rgba(217,119,6,0.1);
+    color: #b45309;
+  }
+  [data-theme="light"] .advisory-item {
+    border-color: rgba(15,23,42,0.06);
+    background: rgba(15,23,42,0.02);
+  }
+  [data-theme="light"] .advisory-item-desc {
+    color: var(--text2);
+  }
+  [data-theme="light"] .advisory-desc {
+    color: var(--text2);
+  }
+  [data-theme="light"] .advisory-title {
+    color: var(--amber);
   }

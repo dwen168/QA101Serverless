@@ -179,21 +179,35 @@ function renderRecommendation(rec, panel) {
     const layer3 = rec.debate.layer3;
     const layer4 = rec.debate.layer4;
     const layer5 = rec.debate.layer5;
+ 
+    const decisionAction = layer5.decision.action || 'HOLD';
+    let decisionColor = '#f59e0b';
+    const upperDecision = String(decisionAction).toUpperCase();
+    if (upperDecision.includes('STRONG BUY')) decisionColor = '#10b981';
+    else if (upperDecision.includes('BUY')) decisionColor = '#6ee7b7';
+    else if (upperDecision.includes('STRONG SELL')) decisionColor = '#dc2626';
+    else if (upperDecision.includes('SELL')) decisionColor = '#f87171';
 
     // Determine quant action to show in mismatch banner
     const quantActionStr = rec.score >= 4 ? 'BUY' : rec.score <= -4 ? 'SELL' : 'HOLD';
+    let quantActionColor = '#f59e0b';
+    const upperQuantAction = String(quantActionStr).toUpperCase();
+    if (upperQuantAction.includes('STRONG BUY')) quantActionColor = '#10b981';
+    else if (upperQuantAction.includes('BUY')) quantActionColor = '#6ee7b7';
+    else if (upperQuantAction.includes('STRONG SELL')) quantActionColor = '#dc2626';
+    else if (upperQuantAction.includes('SELL')) quantActionColor = '#f87171';
 
     const mismatchBanner = rec.quantMismatch
       ? `
         <div class="quant-alignment-banner mismatch" style="padding:12px 14px; border-radius:10px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); margin-bottom:16px; display:flex; flex-direction:column; gap:6px">
           <div style="display:flex; align-items:center; gap:8px; font-weight:700; color:var(--red); font-size:12px; font-family:var(--mono)">
-            <span>⚠️ QUANT DISCREPANCY DETECTED</span>
+            <span>⚠️ QUANT DISCREPANCY DETECTED (PRESERVED MAIN QUANT ACTION)</span>
           </div>
           <div style="font-size:12px; color:var(--text2); line-height:1.45">
-            <div style="margin-bottom:4px"><strong>• Quant Engine Recommendation:</strong> <span style="font-family:var(--mono); font-weight:700">${quantActionStr}</span> (Score: ${rec.score})</div>
-            <div style="margin-bottom:4px"><strong>• Multi-Agent Committee Decision:</strong> <span style="color:${rec.actionColor}; font-weight:700; font-family:var(--mono)">${rec.action}</span> (Confidence: ${rec.confidence}%)</div>
+            <div style="margin-bottom:4px"><strong>• Quant Engine Recommendation (Main Recommendation):</strong> <span style="font-family:var(--mono); font-weight:700">${quantActionStr}</span> (Score: ${rec.score})</div>
+            <div style="margin-bottom:4px"><strong>• AI Committee Advisory Suggestion:</strong> <span style="color:var(--amber); font-weight:700; font-family:var(--mono)">${layer5.decision.action}</span> (Confidence: ${layer5.decision.confidence || rec.confidence}%)</div>
             <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06)">
-              <strong style="color:var(--text)">Reason for Disagreement:</strong> ${rec.quantMismatchConcern || 'N/A'}
+              <strong style="color:var(--text)">AI Advisory Note / Reason for Disagreement:</strong> ${rec.quantMismatchConcern || 'N/A'}
             </div>
           </div>
         </div>
@@ -273,22 +287,41 @@ function renderRecommendation(rec, panel) {
       </div>
 
       <!-- Researcher Debate Log -->
-      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:rgba(0,0,0,0.12); padding:10px; border-radius:8px; border:1px solid var(--border)">
-        <div style="font-size:10px; font-family:var(--mono); color:var(--text3); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em">Bull / Bear Research Debate Loop</div>
-        
-        <div style="padding:6px 8px; border-radius:6px; background:rgba(16,185,129,0.04); border-left: 2px solid var(--green)">
-          <div style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL RESEARCHER (ARGUMENT)</div>
-          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullArgument || 'No argument generated.'}</div>
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:var(--bg3); padding:10px; border-radius:8px; border:1px solid var(--border)">
+        <div style="font-size:10.5px; font-family:var(--mono); color:var(--cyan); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em">Step 1: Opening Arguments (Parallel)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px">
+          <div style="padding:6px 8px; border-radius:6px; background:var(--green-dim); border-left: 2px solid var(--green)">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL ARGUMENT</span>
+              <span style="font-size:8px; font-family:var(--mono); padding:1px 4px; border-radius:3px; background:rgba(16,185,129,0.15); color:var(--green)">CONVICTION: ${layer2.plan.debateHistory?.bullConviction || 'MEDIUM'}</span>
+            </div>
+            <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullArgument || 'No argument generated.'}</div>
+          </div>
+          <div style="padding:6px 8px; border-radius:6px; background:var(--red-dim); border-left: 2px solid var(--red)">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span style="font-size:10px; font-family:var(--mono); color:var(--red); font-weight:700">🐻 BEAR ARGUMENT</span>
+              <span style="font-size:8px; font-family:var(--mono); padding:1px 4px; border-radius:3px; background:rgba(239,68,68,0.15); color:var(--red)">CONVICTION: ${layer2.plan.debateHistory?.bearConviction || 'MEDIUM'}</span>
+            </div>
+            <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bearArgument || 'No argument generated.'}</div>
+          </div>
         </div>
 
-        <div style="padding:6px 8px; border-radius:6px; background:rgba(239,68,68,0.04); border-left: 2px solid var(--red)">
-          <div style="font-size:10px; font-family:var(--mono); color:var(--red); font-weight:700">🐻 BEAR RESEARCHER (REBUTTAL)</div>
-          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bearRebuttal || 'No rebuttal generated.'}</div>
-        </div>
-
-        <div style="padding:6px 8px; border-radius:6px; background:rgba(16,185,129,0.04); border-left: 2px solid var(--green)">
-          <div style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL RESEARCHER (COUNTER-REBUTTAL)</div>
-          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullRebuttal || 'No counter-rebuttal generated.'}</div>
+        <div style="font-size:10.5px; font-family:var(--mono); color:var(--cyan); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em">Step 2: Rebuttals (Parallel)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+          <div style="padding:6px 8px; border-radius:6px; background:var(--green-dim); border-left: 2px solid var(--green)">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL REBUTTAL</span>
+              <span style="font-size:8px; font-family:var(--mono); padding:1px 4px; border-radius:3px; background:rgba(16,185,129,0.15); color:var(--green)">BULLISH</span>
+            </div>
+            <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullRebuttal || 'No counter-rebuttal generated.'}</div>
+          </div>
+          <div style="padding:6px 8px; border-radius:6px; background:var(--red-dim); border-left: 2px solid var(--red)">
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              <span style="font-size:10px; font-family:var(--mono); color:var(--red); font-weight:700">🐻 BEAR REBUTTAL</span>
+              <span style="font-size:8px; font-family:var(--mono); padding:1px 4px; border-radius:3px; background:rgba(239,68,68,0.15); color:var(--red)">BEARISH</span>
+            </div>
+            <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bearRebuttal || 'No rebuttal generated.'}</div>
+          </div>
         </div>
       </div>
 
@@ -296,7 +329,10 @@ function renderRecommendation(rec, panel) {
       <div style="padding:12px; border-radius:10px; border:1px solid rgba(59,130,246,0.25); background:rgba(59,130,246,0.03); margin-bottom:16px">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
           <span style="font-size:11px; font-family:var(--mono); font-weight:700; color:var(--cyan)">🕵️ LEAD RESEARCH SUMMARY (CONSENSUS)</span>
-          <span style="padding:2px 7px; border-radius:4px; font-size:9px; font-family:var(--mono); font-weight:700; background:rgba(245,158,11,0.15); color:var(--amber)">CONVICTION: ${layer2.plan.conviction}</span>
+          <div style="display:flex; gap:6px">
+            <span style="padding:2px 7px; border-radius:4px; font-size:9px; font-family:var(--mono); font-weight:700; background:${layer2.plan.stance === 'BULLISH' ? 'rgba(16,185,129,0.15)' : layer2.plan.stance === 'BEARISH' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)'}; color:${layer2.plan.stance === 'BULLISH' ? 'var(--green)' : layer2.plan.stance === 'BEARISH' ? 'var(--red)' : 'var(--amber)'}">STANCE: ${layer2.plan.stance || 'NEUTRAL'}</span>
+            <span style="padding:2px 7px; border-radius:4px; font-size:9px; font-family:var(--mono); font-weight:700; background:rgba(245,158,11,0.15); color:var(--amber)">CONVICTION: ${layer2.plan.conviction}</span>
+          </div>
         </div>
         <div style="font-size:12px; color:var(--text2); line-height:1.5">${layer2.plan.investmentPlan}</div>
         <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px">
@@ -324,9 +360,12 @@ function renderRecommendation(rec, panel) {
       </div>
 
       <!-- LAYER 4: Risk Management Team -->
-      <div class="debate-round-header" style="margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3)">
-        <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 4</span>
-        <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer4.title}</span>
+      <div class="debate-round-header" style="margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px">
+        <div>
+          <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 4</span>
+          <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer4.title}</span>
+        </div>
+        ${layer4.vetoTriggered ? `<span style="padding:2px 8px; border-radius:4px; font-size:9.5px; font-family:var(--mono); font-weight:700; background:rgba(239,68,68,0.18); color:var(--red); border:1px solid rgba(239,68,68,0.3)">⚠️ RISK VETO ACTIVE (${layer4.highRiskCount}/3 HIGH)</span>` : ''}
       </div>
 
       <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px">
@@ -352,22 +391,22 @@ function renderRecommendation(rec, panel) {
       </div>
 
       <!-- Decision Agent Card -->
-      <div class="debate-card decision" style="border:1px solid ${rec.actionColor}40; background:rgba(255,255,255,0.015); border-radius:12px; padding:12px; margin-bottom:16px">
+      <div class="debate-card decision" style="border:1px solid ${decisionColor}40; background:rgba(255,255,255,0.015); border-radius:12px; padding:12px; margin-bottom:16px">
         <div class="debate-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
           <div style="display:flex; align-items:center; gap:8px">
             <span class="debate-agent-icon">👑</span>
             <span class="debate-agent-name" style="font-size:12px; font-family:var(--mono); font-weight:700; color:var(--text)">${layer5.name} (Verdict)</span>
           </div>
-          <span class="debate-agent-badge decision" style="padding:2px 8px; border-radius:999px; background:${rec.actionColor}20; color:${rec.actionColor}; border: 1px solid ${rec.actionColor}40; font-size:10px; font-family:var(--mono); font-weight:700">DECISION: ${rec.action}</span>
+          <span class="debate-agent-badge decision" style="padding:2px 8px; border-radius:999px; background:${decisionColor}20; color:${decisionColor}; border: 1px solid ${decisionColor}40; font-size:10px; font-family:var(--mono); font-weight:700">DECISION: ${decisionAction}</span>
         </div>
         <div class="debate-card-body">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; flex-wrap:wrap">
             <div style="flex:1; min-width:240px">
-              <div class="debate-verdict-title" style="color:${rec.actionColor}; font-size:17px; font-weight:700">${rec.action}</div>
-              <div style="color:var(--text2); font-size:12px; margin-top:2px">${rec.ticker} · ${rec.confidence}% Confidence</div>
+              <div class="debate-verdict-title" style="color:${decisionColor}; font-size:17px; font-weight:700">${decisionAction}</div>
+              <div style="color:var(--text2); font-size:12px; margin-top:2px">${rec.ticker} · ${layer5.decision.confidence || rec.confidence}% Confidence</div>
               ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
               <div style="width:180px; margin-top:6px">
-                <div class="confidence-bar-wrap" style="height:6px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden"><div class="confidence-bar" style="height:100%; width:${rec.confidence}%; background:${rec.actionColor}"></div></div>
+                <div class="confidence-bar-wrap" style="height:6px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden"><div class="confidence-bar" style="height:100%; width:${layer5.decision.confidence || rec.confidence}%; background:${decisionColor}"></div></div>
               </div>
             </div>
             
@@ -380,11 +419,32 @@ function renderRecommendation(rec, panel) {
             </div>
           </div>
 
-          <p class="debate-analysis" style="font-weight: 500; font-size:12px; line-height:1.6; color:var(--text2); border-left: 2px solid ${rec.actionColor}; padding-left: 10px; margin-bottom:12px">${layer5.decision.rationale}</p>
+          <p class="debate-analysis" style="font-weight: 500; font-size:12px; line-height:1.6; color:var(--text2); border-left: 2px solid ${decisionColor}; padding-left: 10px; margin-bottom:12px">${layer5.decision.rationale}</p>
           
           <div style="margin-top:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.015); border:1px solid var(--border)">
             <div style="font-size:9px; font-family:var(--mono); text-transform:uppercase; color:var(--text3); margin-bottom:4px; letter-spacing:0.05em">Consensus Summary</div>
             <p style="font-size:11px; color:var(--text2); margin:0; line-height:1.5">${layer5.decision.executiveSummary}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quantitative Scoring Card -->
+      <div class="quant-card-verdict" style="border:1px solid ${quantActionColor}40; background:rgba(255,255,255,0.015); border-radius:12px; padding:12px; margin-bottom:16px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <span style="font-size:14px">📊</span>
+            <span style="font-size:12px; font-family:var(--mono); font-weight:700; color:var(--text)">Quant Engine (Verdict)</span>
+          </div>
+          <span style="padding:2px 8px; border-radius:999px; background:${quantActionColor}20; color:${quantActionColor}; border: 1px solid ${quantActionColor}40; font-size:10px; font-family:var(--mono); font-weight:700">QUANT ACTION: ${quantActionStr}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px">
+          <div style="flex:1; min-width:200px">
+            <div style="font-size:17px; font-weight:700; color:${quantActionColor}">${quantActionStr}</div>
+            <div style="color:var(--text3); font-size:11px; margin-top:2px">Rule-based scoring computed directly from technical, fundamental, and macro weights.</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:10px; color:var(--text3); font-family:var(--mono)">Quant Score</div>
+            <div style="font-size:22px; font-weight:700; font-family:var(--mono); color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
           </div>
         </div>
       </div>
@@ -398,27 +458,6 @@ function renderRecommendation(rec, panel) {
 
       <!-- Alignment / Mismatch Banner -->
       ${mismatchBanner}
-
-      <!-- Quantitative Scoring Card -->
-      <div class="quant-card-verdict" style="border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.01); border-radius:12px; padding:12px; margin-bottom:16px">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-          <div style="display:flex; align-items:center; gap:8px">
-            <span style="font-size:14px">📊</span>
-            <span style="font-size:12px; font-family:var(--mono); font-weight:700; color:var(--text)">Quant Engine (Stage 7 Verdict)</span>
-          </div>
-          <span style="padding:2px 8px; border-radius:999px; background:rgba(245,158,11,0.1); color:#f59e0b; border: 1px solid rgba(245,158,11,0.2); font-size:10px; font-family:var(--mono); font-weight:700">QUANT ACTION: ${quantActionStr}</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px">
-          <div style="flex:1; min-width:200px">
-            <div style="font-size:15px; font-weight:700; color:var(--text2)">${quantActionStr}</div>
-            <div style="color:var(--text3); font-size:11px; margin-top:2px">Rule-based scoring computed directly from technical, fundamental, and macro weights.</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:10px; color:var(--text3); font-family:var(--mono)">Quant Score</div>
-            <div style="font-size:22px; font-weight:700; font-family:var(--mono); color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
-          </div>
-        </div>
-      </div>
     `;
   } else {
     headerHtml = `
