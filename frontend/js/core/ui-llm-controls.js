@@ -2,9 +2,9 @@
 
 const API_BASE = '/api';
 const DEFAULT_MODELS = {
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-v4-flash',
   gemini: 'gemini-2.5-flash',
-  ollama: 'qwen3.5:9b',
+  ollama: 'gemma4:e2b',
 };
 const PROVIDER_LABELS = {
   deepseek: 'DeepSeek',
@@ -12,7 +12,7 @@ const PROVIDER_LABELS = {
   ollama: 'Ollama',
 };
 const MODEL_PRESETS = {
-  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
   gemini: ['gemini-2.5-flash'],
   ollama: [],
 };

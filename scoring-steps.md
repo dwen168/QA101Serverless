@@ -829,4 +829,50 @@ The pipeline has been optimized to resolve double-counting and correlation infla
 
 ---
 
-*Last updated: 2026-06-07 · Model calibration: v2.1-timeseries-horizon-calibrated*
+## Stage 8 — Multi-Agent Committee Arena (Optional Overlay)
+
+When the `multiAgent` option is enabled, the raw quantitative recommendation (from Stage 7) is passed into a **modular 5-layer LLM committee pipeline** for qualitative stress-testing, risk analysis, and final decision-making.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1        LAYER 2         LAYER 3        LAYER 4         LAYER 5       │
+│ Analyst Team → Researcher  →  Trade Agent  → Risk Committee → Decision Mgr  │
+│ (Parallel)     Plan           Proposal       (3-way debate)   (Final & Check)│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1. Layer 1: Analyst Team (Parallel, 4 Agents)
+Four domain-specific sub-agents analyze isolated subsets of the market data. They are prompted to be strictly neutral, objective, and evidence-driven:
+* **Fundamental Analyst**: Evaluates PE, EPS, ROE, Free Cash Flow, analyst targets, and earnings surprises.
+* **Technical Analyst**: Evaluates price relative to MA50/MA200, daily momentum, and key oscillators (RSI, MACD, Bollinger Bands, KDJ, OBV, VWAP).
+* **Sentiment Analyst**: Evaluates news sentiment scores, short interest metrics, and insider buying/selling volume.
+* **News & Macro Analyst**: Evaluates macro risk level, dominant CPI/unemployment indicators, interest rate bias (Policy Overlay), and macro sector tailwinds/headwinds.
+
+### 2. Layer 2: Researcher Team (Debate Loop)
+To prevent single-agent confirmation bias and one-sided views, Layer 2 executes a structured multi-turn debate loop:
+* **Bull Researcher (Argument)**: Focuses strictly on building the strongest possible bullish case using Layer 1 analyst evidence (e.g. price breakouts, strong sentiment, earnings beats).
+* **Bear Researcher (Rebuttal)**: Directly counters the bull argument using bearish evidence (e.g. stretched valuations, technical overhead resistance, high macro risk).
+* **Bull Researcher (Counter-Rebuttal)**: Rebuts the bear case to stress-test their warnings.
+* **Lead Researcher Synthesis**: Summarizes the entire debate transcript and outputs the final **Investment Plan** with a specific conviction level (`HIGH`, `MEDIUM`, `LOW`) and key reasons.
+
+### 3. Layer 3: Trade Agent
+Translates the researcher plan and factual analyst summaries into a concrete **Trade Proposal**. It proposes the target Action (`STRONG BUY` to `STRONG SELL`), suggested Position Sizing (`Full`, `Half`, `Quarter`, `None`), and precise price targets (Entry, Stop Loss, Exit).
+
+### 4. Layer 4: Risk Management Team
+Simulates a three-party committee review:
+* **Aggressive Risk Analyst**: Promotes return optimization and catalysts, validating risk-taking arguments.
+* **Conservative Risk Analyst**: Highlights drawdown risk, stop-loss invalidation, and macro tail risks.
+* **Neutral Risk Analyst**: Reconciles the debate and outputs a revised, risk-adjusted proposal.
+
+### 5. Layer 5: Decision Manager
+Acts as the Committee Chair to finalize the trade consensus, confidence score (0-100), executive summary, and key risks.
+
+### Quantitative Alignment Check
+The Decision Manager performs a strict comparison between the final LLM recommendation and the Stage 7 quantitative recommendation:
+* **Aligned (Green Light)**: If the LLM action matches the quantitative model's recommendation, the UI renders a green success banner: *"Quantitative Alignment — AI Decision Manager and quantitative scoring engine are in full agreement."*
+* **Discrepancy (Orange/Red Alert)**: If they mismatch (e.g. LLM overrides a BUY to HOLD/SELL), the UI displays a warning banner: *"Quant Discrepancy Detected"*, accompanied by the Decision Manager's specific explanation (`quantMismatchConcern`) detailing why the AI disagreed with the mathematical scoring signals.
+
+---
+
+*Last updated: 2026-06-09 · Model calibration: v2.1-timeseries-horizon-calibrated*
+

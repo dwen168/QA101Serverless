@@ -108,6 +108,35 @@
         </div>
       `,
       footnote: 'High-level view only: the output includes actionable levels and explanation, but this modal is not a formal algorithm specification.'
+    },
+    step6: {
+      title: 'STEP 6 · Multi-Agent Committee (Experimental)',
+      subtitle: '5-Layer consensus & qualitative verification',
+      html: `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 1: Analysts (Fundamental & Technical)</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Independent agents process underlying indicators, news sentiment, and sector data.</span>
+          </div>
+          <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 2: Bull vs. Bear Research Debate</strong>
+            <span style="font-size:11.5px;color:var(--text2)">A multi-turn structured debate loop to mitigate LLM confirmation bias and hallucinations.</span>
+          </div>
+          <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 3: Trader Proposal</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Formulates positioning strategies, target stop-losses, and profit-taking levels.</span>
+          </div>
+          <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 4: Risk Committee</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Subjects the proposal to macroeconomic constraints, volatility caps, and sector risks.</span>
+          </div>
+          <div style="padding:10px;border:1px solid rgba(139,92,246,0.2);border-radius:10px;background:rgba(139,92,246,0.05)">
+            <strong style="color:#a78bfa;font-size:12px;display:block;margin-bottom:4px">Layer 5: Decision Manager Verdict & Alignment</strong>
+            <span style="font-size:11.5px;color:var(--text2)">Synthesizes the committee's output and evaluates alignment against the quantitative score. A warning banner triggers on divergence.</span>
+          </div>
+        </div>
+      `,
+      footnote: 'Multi-Agent Mode is currently experimental and disabled by default. Industry standards prioritize quantitative models over multi-turn agent execution due to response latency and token overhead.'
     }
   };
 

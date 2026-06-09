@@ -174,128 +174,248 @@ function renderRecommendation(rec, panel) {
 
   let headerHtml = '';
   if (rec.multiAgent && rec.debate) {
-    const round1 = rec.debate.round1;
-    const round2 = rec.debate.round2;
-    const arbitration = rec.debate.arbitration;
+    const layer1 = rec.debate.layer1;
+    const layer2 = rec.debate.layer2;
+    const layer3 = rec.debate.layer3;
+    const layer4 = rec.debate.layer4;
+    const layer5 = rec.debate.layer5;
+
+    // Determine quant action to show in mismatch banner
+    const quantActionStr = rec.score >= 4 ? 'BUY' : rec.score <= -4 ? 'SELL' : 'HOLD';
+
+    const mismatchBanner = rec.quantMismatch
+      ? `
+        <div class="quant-alignment-banner mismatch" style="padding:12px 14px; border-radius:10px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.25); margin-bottom:16px; display:flex; flex-direction:column; gap:6px">
+          <div style="display:flex; align-items:center; gap:8px; font-weight:700; color:var(--red); font-size:12px; font-family:var(--mono)">
+            <span>⚠️ QUANT DISCREPANCY DETECTED</span>
+          </div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.45">
+            <div style="margin-bottom:4px"><strong>• Quant Engine Recommendation:</strong> <span style="font-family:var(--mono); font-weight:700">${quantActionStr}</span> (Score: ${rec.score})</div>
+            <div style="margin-bottom:4px"><strong>• Multi-Agent Committee Decision:</strong> <span style="color:${rec.actionColor}; font-weight:700; font-family:var(--mono)">${rec.action}</span> (Confidence: ${rec.confidence}%)</div>
+            <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.06)">
+              <strong style="color:var(--text)">Reason for Disagreement:</strong> ${rec.quantMismatchConcern || 'N/A'}
+            </div>
+          </div>
+        </div>
+      `
+      : `
+        <div class="quant-alignment-banner matched" style="padding:12px 14px; border-radius:10px; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); margin-bottom:16px; display:flex; flex-direction:column; gap:4px">
+          <div style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2)">
+            <span style="color:var(--green); font-size:16px">✓</span>
+            <strong style="color:var(--green); font-family:var(--mono); font-size:11px; letter-spacing:0.04em">QUANTITATIVE ALIGNMENT</strong>
+          </div>
+          <div style="font-size:11px; color:var(--text3); padding-left:20px">
+            Quant recommendation (<span style="font-family:var(--mono)">${quantActionStr}</span>, Score: ${rec.score}) matches Multi-Agent consensus decision (<span style="font-family:var(--mono)">${rec.action}</span>).
+          </div>
+        </div>
+      `;
+
+    const makeEvidenceBullets = (evidenceList) => {
+      if (!Array.isArray(evidenceList) || evidenceList.length === 0) return '<div style="color:var(--text3); font-style:italic">No explicit evidence reported.</div>';
+      return evidenceList.map(e => `<div style="color:var(--text3); font-size:11px; line-height:1.35; margin-top:2px">• ${e}</div>`).join('');
+    };
 
     headerHtml = `
       <!-- Multi-Agent Consensus Arena Header -->
-      <div class="debate-arena-header">
-        <div class="debate-arena-title">🤖 Multi-Turn Committee Debate Arena</div>
-        <div class="debate-arena-subtitle">Technical vs Fundamental specialists cross-examine setup robustness</div>
+      <div class="debate-arena-header" style="margin-bottom:16px">
+        <div class="debate-arena-title" style="font-size:15px; font-weight:700; color:var(--text)">🤖 5-Layer Committee Debate Arena</div>
+        <div class="debate-arena-subtitle" style="font-size:11px; color:var(--text3)">Modular roles collaborating from factual analysis to risk-adjusted final verdict</div>
       </div>
 
-      <!-- ROUND 1: Opening Thesis -->
-      <div class="debate-round-header">
-        <span class="debate-round-number">ROUND 1</span>
-        <span class="debate-round-title">${round1.title}</span>
+      <!-- LAYER 1: Analyst Team -->
+      <div class="debate-round-header" style="margin-top:16px; margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3)">
+        <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 1</span>
+        <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer1.title}</span>
       </div>
 
-      <div class="debate-arena-grid">
-        <!-- Technical Analyst Agent Column -->
-        <div class="debate-card bullish">
-          <div class="debate-card-header">
-            <span class="debate-agent-icon">🐂</span>
-            <span class="debate-agent-name">${round1.technicalAnalyst.name}</span>
-            <span class="debate-agent-badge pos">TECH FOCUS</span>
-          </div>
-          <div class="debate-card-body">
-            <p class="debate-analysis">${round1.technicalAnalyst.analysis}</p>
-            <div class="debate-bullets">
-              ${(round1.technicalAnalyst.drivers || []).map(d => `<div class="debate-bullet"><span class="bullet-icon">▲</span> ${d}</div>`).join('')}
-            </div>
+      <div class="debate-arena-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px">
+        <!-- Fundamental Analyst -->
+        <div class="debate-card" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.01)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--cyan); font-weight:700; margin-bottom:4px">📊 FUNDAMENTAL ANALYST</div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.4">${layer1.fundamental.analysis}</div>
+          <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.04); padding-top:6px">
+            ${makeEvidenceBullets(layer1.fundamental.evidence)}
           </div>
         </div>
 
-        <!-- Risk & Fundamental Analyst Agent Column -->
-        <div class="debate-card bearish">
-          <div class="debate-card-header">
-            <span class="debate-agent-icon">🐻</span>
-            <span class="debate-agent-name">${round1.riskAnalyst.name}</span>
-            <span class="debate-agent-badge neg">RISK/FUNDAMENTAL</span>
+        <!-- Technical Analyst -->
+        <div class="debate-card" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.01)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--cyan); font-weight:700; margin-bottom:4px">📈 TECHNICAL ANALYST</div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.4">${layer1.technical.analysis}</div>
+          <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.04); padding-top:6px">
+            ${makeEvidenceBullets(layer1.technical.evidence)}
           </div>
-          <div class="debate-card-body">
-            <p class="debate-analysis">${round1.riskAnalyst.analysis}</p>
-            <div class="debate-bullets">
-              ${(round1.riskAnalyst.risks || []).map(r => `<div class="debate-bullet"><span class="bullet-icon">▼</span> ${r}</div>`).join('')}
-            </div>
+        </div>
+
+        <!-- Sentiment Analyst -->
+        <div class="debate-card" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.01)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--cyan); font-weight:700; margin-bottom:4px">💬 SENTIMENT ANALYST</div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.4">${layer1.sentiment.analysis}</div>
+          <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.04); padding-top:6px">
+            ${makeEvidenceBullets(layer1.sentiment.evidence)}
+          </div>
+        </div>
+
+        <!-- News Analyst -->
+        <div class="debate-card" style="padding:10px; border-radius:8px; border:1px solid var(--border); background:rgba(255,255,255,0.01)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--cyan); font-weight:700; margin-bottom:4px">🌍 NEWS & MACRO ANALYST</div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.4">${layer1.news.analysis}</div>
+          <div style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.04); padding-top:6px">
+            ${makeEvidenceBullets(layer1.news.evidence)}
           </div>
         </div>
       </div>
 
-      <!-- ROUND 2: Rebuttals -->
-      <div class="debate-round-header">
-        <span class="debate-round-number">ROUND 2</span>
-        <span class="debate-round-title">${round2.title}</span>
+      <!-- LAYER 2: Researcher Team -->
+      <div class="debate-round-header" style="margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3)">
+        <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 2</span>
+        <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer2.title}</span>
       </div>
 
-      <div class="debate-arena-grid">
-        <!-- Technical Analyst Rebuttal Column -->
-        <div class="debate-card bullish rebuttal-card">
-          <div class="debate-card-header">
-            <span class="debate-agent-icon">🐂</span>
-            <span class="debate-agent-name">${round2.technicalAnalyst.name}</span>
-            <span class="debate-agent-badge pos" style="opacity:0.7">REBUTTAL</span>
-          </div>
-          <div class="debate-card-body">
-            <p class="debate-analysis" style="font-style: italic">"${round2.technicalAnalyst.rebuttal}"</p>
-          </div>
+      <!-- Researcher Debate Log -->
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px; background:rgba(0,0,0,0.12); padding:10px; border-radius:8px; border:1px solid var(--border)">
+        <div style="font-size:10px; font-family:var(--mono); color:var(--text3); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.04em">Bull / Bear Research Debate Loop</div>
+        
+        <div style="padding:6px 8px; border-radius:6px; background:rgba(16,185,129,0.04); border-left: 2px solid var(--green)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL RESEARCHER (ARGUMENT)</div>
+          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullArgument || 'No argument generated.'}</div>
         </div>
 
-        <!-- Risk Analyst Rebuttal Column -->
-        <div class="debate-card bearish rebuttal-card">
-          <div class="debate-card-header">
-            <span class="debate-agent-icon">🐻</span>
-            <span class="debate-agent-name">${round2.riskAnalyst.name}</span>
-            <span class="debate-agent-badge neg" style="opacity:0.7">REBUTTAL</span>
-          </div>
-          <div class="debate-card-body">
-            <p class="debate-analysis" style="font-style: italic">"${round2.riskAnalyst.rebuttal}"</p>
-          </div>
+        <div style="padding:6px 8px; border-radius:6px; background:rgba(239,68,68,0.04); border-left: 2px solid var(--red)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--red); font-weight:700">🐻 BEAR RESEARCHER (REBUTTAL)</div>
+          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bearRebuttal || 'No rebuttal generated.'}</div>
+        </div>
+
+        <div style="padding:6px 8px; border-radius:6px; background:rgba(16,185,129,0.04); border-left: 2px solid var(--green)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700">🐂 BULL RESEARCHER (COUNTER-REBUTTAL)</div>
+          <div style="font-size:11px; color:var(--text2); line-height:1.45; margin-top:2px">${layer2.plan.debateHistory?.bullRebuttal || 'No counter-rebuttal generated.'}</div>
+        </div>
+      </div>
+
+      <!-- Synthesis Plan -->
+      <div style="padding:12px; border-radius:10px; border:1px solid rgba(59,130,246,0.25); background:rgba(59,130,246,0.03); margin-bottom:16px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+          <span style="font-size:11px; font-family:var(--mono); font-weight:700; color:var(--cyan)">🕵️ LEAD RESEARCH SUMMARY (CONSENSUS)</span>
+          <span style="padding:2px 7px; border-radius:4px; font-size:9px; font-family:var(--mono); font-weight:700; background:rgba(245,158,11,0.15); color:var(--amber)">CONVICTION: ${layer2.plan.conviction}</span>
+        </div>
+        <div style="font-size:12px; color:var(--text2); line-height:1.5">${layer2.plan.investmentPlan}</div>
+        <div style="margin-top:8px; display:flex; flex-direction:column; gap:4px">
+          ${(layer2.plan.reasons || []).map(r => `<div style="font-size:11px; color:var(--text3)"><span style="color:var(--cyan); margin-right:4px">✔</span>${r}</div>`).join('')}
+        </div>
+      </div>
+
+      <!-- LAYER 3: Trade Execution -->
+      <div class="debate-round-header" style="margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3)">
+        <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 3</span>
+        <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer3.title}</span>
+      </div>
+
+      <div style="padding:12px; border-radius:10px; border:1px solid var(--border); background:rgba(255,255,255,0.01); margin-bottom:16px; display:flex; gap:16px; flex-wrap:wrap">
+        <div style="flex:1; min-width:200px">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--cyan); font-weight:700; margin-bottom:4px">⚡ EXECUTION STRATEGY</div>
+          <div style="font-size:12px; color:var(--text2); line-height:1.45">${layer3.proposal.rationale}</div>
+        </div>
+        <div style="flex-shrink:0; display:flex; flex-direction:column; gap:4px; min-width:130px; padding-left:14px; border-left:1px solid var(--border)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--text3)">Proposed Action</div>
+          <div style="font-size:15px; font-weight:700; color:${rec.actionColor}">${layer3.proposal.action}</div>
+          <div style="font-size:10px; font-family:var(--mono); color:var(--text3); margin-top:4px">Target Sizing</div>
+          <div style="font-size:12px; font-weight:600; color:var(--text)">${layer3.proposal.size}</div>
+        </div>
+      </div>
+
+      <!-- LAYER 4: Risk Management Team -->
+      <div class="debate-round-header" style="margin-bottom:10px; font-size:11px; font-family:var(--mono); color:var(--text3)">
+        <span class="debate-round-number" style="background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px; margin-right:6px">LAYER 4</span>
+        <span class="debate-round-title" style="text-transform:uppercase; letter-spacing:0.05em">${layer4.title}</span>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px">
+        <div style="padding:10px; border-radius:8px; border:1px solid rgba(239,68,68,0.18); background:rgba(239,68,68,0.02)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--red); font-weight:700; margin-bottom:4px">🛡️ CONSERVATIVE RISK ANALYST</div>
+          <p style="font-size:11px; color:var(--text2); margin:0; line-height:1.4">${layer4.conservative}</p>
+        </div>
+        <div style="padding:10px; border-radius:8px; border:1px solid rgba(16,185,129,0.18); background:rgba(16,185,129,0.02)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--green); font-weight:700; margin-bottom:4px">🚀 AGGRESSIVE RISK ANALYST</div>
+          <p style="font-size:11px; color:var(--text2); margin:0; line-height:1.4">${layer4.aggressive}</p>
+        </div>
+        <div style="padding:10px; border-radius:8px; border:1px solid rgba(245,158,11,0.18); background:rgba(245,158,11,0.02)">
+          <div style="font-size:10px; font-family:var(--mono); color:var(--amber); font-weight:700; margin-bottom:4px">⚖️ NEUTRAL RISK ANALYST (CONSENSUS)</div>
+          <p style="font-size:11px; color:var(--text2); margin:0; line-height:1.4">${layer4.neutral}</p>
         </div>
       </div>
 
       <!-- ARBITRATION SECTOR -->
-      <div class="debate-flow-divider">
-        <div class="debate-flow-line"></div>
-        <div class="debate-flow-badge">⚖ Committee Verdict & Arbitration</div>
-        <div class="debate-flow-line"></div>
+      <div class="debate-flow-divider" style="display:flex; align-items:center; gap:8px; margin:20px 0 12px">
+        <div class="debate-flow-line" style="flex:1; height:1px; background:var(--border)"></div>
+        <div class="debate-flow-badge" style="font-size:11px; font-family:var(--mono); color:var(--cyan); letter-spacing:0.04em">⚖ LAYER 5: DECISION MANAGER VERDICT</div>
+        <div class="debate-flow-line" style="flex:1; height:1px; background:var(--border)"></div>
       </div>
 
       <!-- Decision Agent Card -->
-      <div class="debate-card decision">
-        <div class="debate-card-header">
+      <div class="debate-card decision" style="border:1px solid ${rec.actionColor}40; background:rgba(255,255,255,0.015); border-radius:12px; padding:12px; margin-bottom:16px">
+        <div class="debate-card-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
           <div style="display:flex; align-items:center; gap:8px">
             <span class="debate-agent-icon">👑</span>
-            <span class="debate-agent-name">${arbitration.name} (Verdict)</span>
+            <span class="debate-agent-name" style="font-size:12px; font-family:var(--mono); font-weight:700; color:var(--text)">${layer5.name} (Verdict)</span>
           </div>
-          <span class="debate-agent-badge decision" style="background:${rec.actionColor}20; color:${rec.actionColor}; border: 1px solid ${rec.actionColor}40">${rec.action}</span>
+          <span class="debate-agent-badge decision" style="padding:2px 8px; border-radius:999px; background:${rec.actionColor}20; color:${rec.actionColor}; border: 1px solid ${rec.actionColor}40; font-size:10px; font-family:var(--mono); font-weight:700">DECISION: ${rec.action}</span>
         </div>
         <div class="debate-card-body">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; flex-wrap:wrap">
             <div style="flex:1; min-width:240px">
-              <div class="debate-verdict-title" style="color:${rec.actionColor}; font-size:18px; font-weight:700">${rec.action}</div>
+              <div class="debate-verdict-title" style="color:${rec.actionColor}; font-size:17px; font-weight:700">${rec.action}</div>
               <div style="color:var(--text2); font-size:12px; margin-top:2px">${rec.ticker} · ${rec.confidence}% Confidence</div>
               ${rec.backtestView ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">Backtest (price+tech): <strong style="color:${rec.backtestView.action.includes('BUY') ? 'var(--green)' : rec.backtestView.action.includes('SELL') ? 'var(--red)' : 'var(--amber)'}">${rec.backtestView.action}</strong> · score ${rec.backtestView.score}</div>` : ''}
               <div style="width:180px; margin-top:6px">
-                <div class="confidence-bar-wrap"><div class="confidence-bar" style="width:${rec.confidence}%;background:${rec.actionColor}"></div></div>
+                <div class="confidence-bar-wrap" style="height:6px; border-radius:999px; background:rgba(255,255,255,0.06); overflow:hidden"><div class="confidence-bar" style="height:100%; width:${rec.confidence}%; background:${rec.actionColor}"></div></div>
               </div>
             </div>
             
             <div style="text-align:right; flex-shrink:0">
               <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Signal Score</div>
-              <div style="font-size:28px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
+              <div style="font-size:26px;font-weight:600;font-family:var(--mono);color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
               <div style="margin-top:8px">
                 <button type="button" class="run-rec-backtest" data-ticker="${rec.ticker}" style="cursor:pointer;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.02);font-size:11px;color:var(--text3);font-family:var(--mono)">Run strategy backtest</button>
               </div>
             </div>
           </div>
 
-          <p class="debate-analysis" style="font-weight: 500; font-size:13px; line-height:1.65; color:var(--text2); border-left: 2px solid ${rec.actionColor}; padding-left: 10px; margin-bottom:12px">${arbitration.finalVerdict}</p>
+          <p class="debate-analysis" style="font-weight: 500; font-size:12px; line-height:1.6; color:var(--text2); border-left: 2px solid ${rec.actionColor}; padding-left: 10px; margin-bottom:12px">${layer5.decision.rationale}</p>
           
           <div style="margin-top:10px; padding:10px; border-radius:8px; background:rgba(255,255,255,0.015); border:1px solid var(--border)">
-            <div style="font-size:10px; font-family:var(--mono); text-transform:uppercase; color:var(--text3); margin-bottom:4px; letter-spacing:0.05em">Arbitration compromise rationale</div>
-            <p style="font-size:12px; color:var(--text2); margin:0; line-height:1.55">${arbitration.debateSummary}</p>
+            <div style="font-size:9px; font-family:var(--mono); text-transform:uppercase; color:var(--text3); margin-bottom:4px; letter-spacing:0.05em">Consensus Summary</div>
+            <p style="font-size:11px; color:var(--text2); margin:0; line-height:1.5">${layer5.decision.executiveSummary}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- QUANT VS MULTI-AGENT COMPARISON -->
+      <div class="debate-flow-divider" style="display:flex; align-items:center; gap:8px; margin:20px 0 12px">
+        <div class="debate-flow-line" style="flex:1; height:1px; background:var(--border)"></div>
+        <div class="debate-flow-badge" style="font-size:11px; font-family:var(--mono); color:var(--cyan); letter-spacing:0.04em">📊 QUANT VS MULTI-AGENT COMPARISON</div>
+        <div class="debate-flow-line" style="flex:1; height:1px; background:var(--border)"></div>
+      </div>
+
+      <!-- Alignment / Mismatch Banner -->
+      ${mismatchBanner}
+
+      <!-- Quantitative Scoring Card -->
+      <div class="quant-card-verdict" style="border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.01); border-radius:12px; padding:12px; margin-bottom:16px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+          <div style="display:flex; align-items:center; gap:8px">
+            <span style="font-size:14px">📊</span>
+            <span style="font-size:12px; font-family:var(--mono); font-weight:700; color:var(--text)">Quant Engine (Stage 7 Verdict)</span>
+          </div>
+          <span style="padding:2px 8px; border-radius:999px; background:rgba(245,158,11,0.1); color:#f59e0b; border: 1px solid rgba(245,158,11,0.2); font-size:10px; font-family:var(--mono); font-weight:700">QUANT ACTION: ${quantActionStr}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px">
+          <div style="flex:1; min-width:200px">
+            <div style="font-size:15px; font-weight:700; color:var(--text2)">${quantActionStr}</div>
+            <div style="color:var(--text3); font-size:11px; margin-top:2px">Rule-based scoring computed directly from technical, fundamental, and macro weights.</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:10px; color:var(--text3); font-family:var(--mono)">Quant Score</div>
+            <div style="font-size:22px; font-weight:700; font-family:var(--mono); color:${rec.score > 0 ? 'var(--green)' : rec.score < 0 ? 'var(--red)' : 'var(--amber)'}">${rec.score > 0 ? '+' : ''}${rec.score}</div>
           </div>
         </div>
       </div>

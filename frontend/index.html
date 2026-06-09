@@ -252,6 +252,34 @@
             <p>Natural-language prompts work well for Australian and US share analysis workflows.</p>
           </div>
         </div>
+        <!-- Multi-Agent Mode Advisory -->
+        <div class="welcome-card" style="grid-column: 1 / span 2; border: 1px solid rgba(245,158,11,0.22); background: radial-gradient(circle at top right, rgba(245,158,11,0.08), transparent 35%), linear-gradient(180deg, rgba(24,18,12,0.98), rgba(16,11,8,0.94)); display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: inline-flex; align-self: flex-start; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(245,158,11,0.3); background: rgba(245,158,11,0.1); color: #fef08a; font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.12em;">
+             ⚠️ Advisory: Multi-Agent Mode (Experimental)
+          </div>
+          <h3 style="margin-top: 6px; font-size: 16px; color: var(--amber); letter-spacing: -0.02em;">Multi-Agent System Disclaimer</h3>
+          <p style="margin-top: 2px; font-size: 13.5px; line-height: 1.6; color: var(--text2);">
+            The <strong>Multi-Agent Committee</strong> execution framework is an <strong>experimental feature</strong>. Quantitative models and algorithms remain the dominant industry standard for systematic equity research due to critical agent limitations:
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 10px;">
+            <div style="padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02);">
+              <span style="display: block; font-size: 9px; font-family: var(--mono); text-transform: uppercase; color: var(--amber); margin-bottom: 4px;">1. High Latency</span>
+              <span style="font-size: 11px; color: var(--text2); line-height: 1.4; display: block;">Multi-turn debates between bull/bear agents and consensus reviews add significant processing delay.</span>
+            </div>
+            <div style="padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02);">
+              <span style="display: block; font-size: 9px; font-family: var(--mono); text-transform: uppercase; color: var(--amber); margin-bottom: 4px;">2. High Token Cost</span>
+              <span style="font-size: 11px; color: var(--text2); line-height: 1.4; display: block;">Generating massive qualitative reasoning across 5 distinct LLM steps demands high API usage.</span>
+            </div>
+            <div style="padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02);">
+              <span style="display: block; font-size: 9px; font-family: var(--mono); text-transform: uppercase; color: var(--amber); margin-bottom: 4px;">3. Hallucination Risk</span>
+              <span style="font-size: 11px; color: var(--text2); line-height: 1.4; display: block;">LLMs can generate ungrounded qualitative justifications or misinterpret precise numeric bounds.</span>
+            </div>
+            <div style="padding: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02);">
+              <span style="display: block; font-size: 9px; font-family: var(--mono); text-transform: uppercase; color: var(--amber); margin-bottom: 4px;">4. Optimism Bias</span>
+              <span style="font-size: 11px; color: var(--text2); line-height: 1.4; display: block;">LLMs lean bullish due to sycophancy/data distributions, necessitating rigid quantitative guards.</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -324,6 +352,10 @@
           <div class="decision-step-card" data-step="step5" onclick="selectDecisionStep('step5')" style="padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:rgba(16,185,129,0.07)">
             <div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:6px">STEP 5 · RECOMMENDATION</div>
             <div style="font-size:14px;color:var(--text)">Outputs recommendation + confidence + rationale summary so users can inspect why the decision was made.</div>
+          </div>
+          <div class="decision-step-card" data-step="step6" onclick="selectDecisionStep('step6')" style="padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:rgba(139,92,246,0.07)">
+            <div style="font-family:var(--mono);font-size:11px;color:#a78bfa;margin-bottom:6px">STEP 6 · MULTI-AGENT COMMITTEE (EXPERIMENTAL)</div>
+            <div style="font-size:14px;color:var(--text)">Runs a 5-layer consensus committee (Analysts, Debate, Trader, Risk, Decision Manager) for qualitative alignment checks.</div>
           </div>
         </div>
 

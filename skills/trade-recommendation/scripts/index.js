@@ -87,6 +87,7 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
       takeProfit,
       riskReward,
       llm,
+      quantAction: action,
     });
 
     finalAction = multiAgentResult.action;
@@ -152,6 +153,8 @@ Context:
 
     llmRecommendation = llmRecommendationResult;
     llmRecommendation.timeHorizon = normalizedTimeHorizon;
+    llmRecommendation.quantMismatch = false;
+    llmRecommendation.quantMismatchConcern = '';
     confidenceExplanation = confidenceExplanationResult;
   }
 
