@@ -177,11 +177,19 @@ function createApp() {
   const parseCorsOrigins = () => {
     const raw = String(process.env.CORS_ORIGIN || '').trim();
     if (!raw) return null;
-    const values = raw
+    return raw
       .split(',')
       .map((entry) => entry.trim())
       .filter(Boolean);
-    return values.length ? new Set(values) : null;
+  };
+
+  const matchesCorsPattern = (origin, pattern) => {
+    if (pattern === '*' || origin === pattern) return true;
+    if (pattern.includes('*')) {
+      const regexPattern = '^' + pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*') + '$';
+      return new RegExp(regexPattern).test(origin);
+    }
+    return false;
   };
 
   const getAutoAllowedVercelOrigins = () => {
@@ -208,34 +216,56 @@ function createApp() {
     return new Set(candidates);
   };
 
-  const allowedCorsOrigins = parseCorsOrigins();
+  const allowedCorsPatterns = parseCorsOrigins();
   const autoAllowedVercelOrigins = getAutoAllowedVercelOrigins();
-  const corsOptions = {
-    origin(origin, callback) {
-      if (!origin) {
-        callback(null, true);
-        return;
+
+  const corsMiddleware = (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!origin) {
+      return cors({ credentials: true })(req, res, next);
+    }
+
+    let isAllowed = false;
+
+    if (allowedCorsPatterns) {
+      if (allowedCorsPatterns.some((pattern) => matchesCorsPattern(origin, pattern))) {
+        isAllowed = true;
       }
+    }
 
-      if (!allowedCorsOrigins) {
-        if (!config.isVercel) {
-          callback(null, true);
-          return;
+    if (!isAllowed) {
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      if (host) {
+        const proto = req.headers['x-forwarded-proto'] || 'https';
+        if (origin === `${proto}://${host}` || origin === `http://${host}` || origin === `https://${host}`) {
+          isAllowed = true;
         }
-
-        if (autoAllowedVercelOrigins.has(origin)) {
-          callback(null, true);
-          return;
-        }
-
-        callback(new Error('CORS origin is not allowed'));
-        return;
       }
+    }
 
-      callback(null, allowedCorsOrigins.has(origin));
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'OPTIONS'],
+    if (!isAllowed && autoAllowedVercelOrigins.has(origin)) {
+      isAllowed = true;
+    }
+
+    if (!isAllowed) {
+      try {
+        const url = new URL(origin);
+        if (url.hostname === 'wendao51.com' || url.hostname.endsWith('.wendao51.com')) {
+          isAllowed = true;
+        }
+      } catch (e) {}
+    }
+
+    if (!isAllowed && !config.isVercel) {
+      isAllowed = true;
+    }
+
+    cors({
+      origin: isAllowed ? origin : false,
+      credentials: true,
+      methods: ['GET', 'POST', 'OPTIONS', 'HEAD', 'PUT', 'DELETE'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'x-llm-provider', 'x-llm-model'],
+    })(req, res, next);
   };
 
   const loginAttempts = new Map();
@@ -276,7 +306,7 @@ function createApp() {
     return history.length > API_MAX_REQUESTS;
   };
 
-  app.use(cors(corsOptions));
+  app.use(corsMiddleware);
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
